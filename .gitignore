@@ -1,4 +1,4 @@
-# Python Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -24,37 +24,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# Environments
+# Virtual environment
 .env
 .venv
 env/
@@ -65,10 +35,10 @@ venv.bak/
 
 # Streamlit Secrets
 .streamlit/secrets.toml
-secrets.toml
+secrets.toml # 만약 루트에 생성했다면
 
-# Data files managed by Azure Blob Storage (DO NOT COMMIT THESE)
-# 이 파일들은 로컬 테스트 시 생성될 수 있으나, Git에는 포함하지 않습니다.
+# Data files now managed by Azure Blob Storage
+# These might be created during local testing but should NOT be in Git
 users.json
 upload_log.json
 usage_log.json
@@ -78,13 +48,10 @@ metadata.json
 # IDE-specific
 .idea/
 .vscode/
-*.sublime-project
-*.sublime-workspace
 
 # OS-specific
 .DS_Store
 Thumbs.db
-Desktop.ini
 
 # Temporary files
 *.tmp
