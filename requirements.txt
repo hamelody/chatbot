@@ -6,7 +6,6 @@ python-pptx
 faiss-cpu
 openai
 numpy
-azure-ai-openai
 azure-storage-blob
 werkzeug
 streamlit-cookies-manager
