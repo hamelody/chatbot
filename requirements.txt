@@ -10,3 +10,4 @@ azure-storage-blob
 werkzeug
 streamlit-cookies-manager
 openpyxl
+tiktoken
