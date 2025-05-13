@@ -848,7 +848,7 @@ with chat_interface_tab:
                     chat_completion_response = openai_client.chat.completions.create(
                         model=st.secrets["AZURE_OPENAI_DEPLOYMENT"], 
                         messages=chat_messages, 
-                        max_tokens=16,384,
+                        max_tokens=16384,
                         temperature=0.1,
                         timeout=AZURE_OPENAI_TIMEOUT 
                     )
