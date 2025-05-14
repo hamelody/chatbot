@@ -35,7 +35,6 @@ from streamlit_cookies_manager import EncryptedCookieManager
 print("Imported streamlit_cookies_manager after set_page_config.")
 
 # --- Tiktoken 인코더 로드 ---
-# (이전과 동일)
 try:
     tokenizer = tiktoken.get_encoding("o200k_base")
     print("Tiktoken 'o200k_base' encoder loaded successfully.")
@@ -45,7 +44,6 @@ except Exception as e:
     tokenizer = None
 
 # --- Base64 인코딩 함수 정의 ---
-# (이전과 동일)
 def get_base64_of_bin_file(bin_file_path):
     try:
         with open(bin_file_path, 'rb') as f:
@@ -59,7 +57,6 @@ def get_base64_of_bin_file(bin_file_path):
         return None
 
 # --- 전역 변수 및 경로 설정 ---
-# (이전과 동일)
 RULES_PATH_REPO = ".streamlit/prompt_rules.txt"
 COMPANY_LOGO_PATH_REPO = "company_logo.png"
 INDEX_BLOB_NAME = "vector_db/vector.index"
@@ -70,11 +67,11 @@ USAGE_LOG_BLOB_NAME = "app_logs/usage_log.json"
 AZURE_OPENAI_TIMEOUT = 60.0
 MODEL_MAX_INPUT_TOKENS = 128000
 MODEL_MAX_OUTPUT_TOKENS = 16384
-BUFFER_TOKENS = 500
+BUFFER_TOKENS = 500 # 프롬프트 규칙, 사용자 질문 외 추가 버퍼
 TARGET_INPUT_TOKENS_FOR_PROMPT = MODEL_MAX_INPUT_TOKENS - MODEL_MAX_OUTPUT_TOKENS - BUFFER_TOKENS
 
+
 # --- CSS 스타일 ---
-# (이전과 동일)
 st.markdown("""
 <style>
     /* (기존 CSS 스타일 내용 유지) */
@@ -142,9 +139,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 # --- Azure 클라이언트 초기화 ---
-# (이전과 동일)
 @st.cache_resource
 def get_azure_openai_client_cached():
     print("Attempting to initialize Azure OpenAI client...")
@@ -204,7 +199,6 @@ if openai_client:
 
 
 # --- 데이터 로드/저장 유틸리티 함수 (Blob 연동) ---
-# (load_data_from_blob, save_data_to_blob, save_binary_data_to_blob 함수는 이전과 동일)
 def load_data_from_blob(blob_name, _container_client, data_description="데이터", default_value=None):
     if not _container_client:
         print(f"ERROR: Blob Container client is None for load_data_from_blob ('{data_description}'). Returning default.")
@@ -305,7 +299,6 @@ def save_binary_data_to_blob(local_file_path, blob_name, _container_client, data
 
 
 # --- 사용자 정보 로드 ---
-# (USERS 로드 로직은 이전과 동일)
 USERS = {}
 if container_client:
     USERS = load_data_from_blob(USERS_BLOB_NAME, container_client, "사용자 정보", default_value={})
@@ -329,7 +322,6 @@ else:
 
 
 # --- 쿠키 매니저 및 세션 상태 초기화 ---
-# (쿠키 및 세션 초기화 로직은 이전과 동일)
 cookies = None
 cookie_manager_ready = False
 print(f"Attempting to load COOKIE_SECRET from st.secrets: {st.secrets.get('COOKIE_SECRET')}")
@@ -343,9 +335,6 @@ try:
             prefix="gmp_chatbot_auth_v5_0/",
             password=cookie_secret_key
         )
-        # .ready() 호출 전에 쿠키 매니저가 실제로 사용 가능한지 확인
-        # Streamlit 스크립트 실행 흐름 상, 첫 실행 시에는 ready가 아닐 수 있음
-        # 실제 사용 시점에서 .ready()를 다시 확인하는 것이 안전할 수 있음
         if cookies.ready():
             cookie_manager_ready = True
             print("CookieManager is ready.")
@@ -372,9 +361,8 @@ if "authenticated" not in st.session_state:
     st.session_state["user"] = {}
     st.session_state["messages"] = []
 
-    # 쿠키 매니저가 준비되었는지 다시 확인 후 쿠키 로드 시도
     if 'cookies' in locals() and cookies and cookies.ready():
-        cookie_manager_ready = True # 여기서 ready 상태가 될 수 있음
+        cookie_manager_ready = True
         print("CookieManager became ready before cookie check.")
         auth_cookie_val = cookies.get("authenticated")
         print(f"Cookie 'authenticated' value on session init: {auth_cookie_val}")
@@ -402,14 +390,14 @@ if "authenticated" not in st.session_state:
                 st.session_state["authenticated"] = False
                 st.session_state["messages"] = []
                 if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save()
-        else: # authenticated 쿠키가 "true"가 아닌 경우
+        else:
              print("Authenticated cookie not set to 'true'.")
-             st.session_state["authenticated"] = False # 명시적 초기화
+             st.session_state["authenticated"] = False
 
     elif 'cookies' in locals() and cookies and not cookies.ready():
          print("CookieManager still not ready, cannot restore session from cookie on session init.")
-         st.session_state["authenticated"] = False # 쿠키 사용 불가 시 비인증 상태
-    else: # cookies 객체 자체가 None인 경우 (초기화 실패 등)
+         st.session_state["authenticated"] = False
+    else:
          print("CookieManager object is None, cannot restore session.")
          st.session_state["authenticated"] = False
 
@@ -420,7 +408,6 @@ if "messages" not in st.session_state:
 
 
 # --- 로그인 UI 및 로직 ---
-# (로그인 UI 로직은 이전과 동일)
 if not st.session_state.get("authenticated", False):
     st.markdown("""
     <div class="login-page-header-container">
@@ -431,10 +418,7 @@ if not st.session_state.get("authenticated", False):
 
     st.markdown('<p class="login-form-title">🔐 로그인 또는 회원가입</p>', unsafe_allow_html=True)
 
-    # 로그인 폼 표시 전에 쿠키 매니저 준비 상태 확인
     if 'cookies' in locals() and cookies and not cookies.ready() and st.secrets.get("COOKIE_SECRET"):
-        # .ready()를 다시 호출하여 상태 업데이트 시도 (필수는 아님)
-        # cookies.ready()
         st.warning("쿠키 시스템을 초기화하고 있습니다. 잠시 후 새로고침하거나 다시 시도해주세요.")
         print("Login UI: CookieManager not ready yet.")
 
@@ -462,7 +446,6 @@ if not st.session_state.get("authenticated", False):
                     st.session_state["user"] = user_data_login
                     st.session_state["messages"] = []
                     print(f"Login successful for user '{uid}'. Chat messages cleared.")
-                    # 쿠키 저장 시점에 ready 확인
                     if 'cookies' in locals() and cookies and cookies.ready():
                         try:
                             cookies["authenticated"] = "true"; cookies["user"] = json.dumps(user_data_login)
@@ -489,12 +472,10 @@ if not st.session_state.get("authenticated", False):
                         st.success("가입 신청 완료! 관리자 승인 후 로그인 가능합니다.")
     st.stop()
 
-
 # --- 인증 후 메인 애플리케이션 로직 ---
 current_user_info = st.session_state.get("user", {})
 
 # --- 헤더 (로고, 버전, 로그아웃 버튼) ---
-# (헤더 로직은 이전과 동일)
 top_cols_main = st.columns([0.7, 0.3])
 with top_cols_main[0]:
     if os.path.exists(COMPANY_LOGO_PATH_REPO):
@@ -503,13 +484,13 @@ with top_cols_main[0]:
             st.markdown(f"""
             <div class="logo-container">
                 <img src="data:image/png;base64,{logo_b64}" class="logo-image" width="150">
-                <span class="version-text">ver 0.9.2 (Tiktoken Fix)</span>
+                <span class="version-text">ver 0.9.3 (Vector Search Fix)</span>
             </div>""", unsafe_allow_html=True) # 버전 업데이트
         else:
-            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.2 (Tiktoken Fix)</span></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.3 (Vector Search Fix)</span></div>""", unsafe_allow_html=True)
     else:
         print(f"WARNING: Company logo file not found at {COMPANY_LOGO_PATH_REPO}")
-        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.2 (Tiktoken Fix)</span></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.3 (Vector Search Fix)</span></div>""", unsafe_allow_html=True)
 
 with top_cols_main[1]:
     st.markdown('<div style="text-align: right;">', unsafe_allow_html=True)
@@ -530,7 +511,6 @@ with top_cols_main[1]:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # --- 메인 앱 제목 (로그인 후) ---
-# (메인 앱 제목 로직은 이전과 동일)
 st.markdown("""
 <div class="main-app-title-container">
   <span class="main-app-title">유앤생명과학 GMP/SOP 업무 가이드 봇</span>
@@ -540,7 +520,6 @@ st.markdown("""
 
 
 # --- 벡터 DB 로드 (Azure Blob Storage 기반) ---
-# (벡터 DB 로드 로직은 이전과 동일)
 @st.cache_resource
 def load_vector_db_from_blob_cached(_container_client):
     if not _container_client:
@@ -592,17 +571,21 @@ def load_vector_db_from_blob_cached(_container_client):
 index, metadata = faiss.IndexFlatL2(1536), []
 if container_client:
     index, metadata = load_vector_db_from_blob_cached(container_client)
+    # <<< 추가된 디버깅 로그 시작 >>>
+    print(f"DEBUG: FAISS index loaded after cache. ntotal: {index.ntotal if index else 'Index is None'}")
+    print(f"DEBUG: Metadata loaded after cache. Length: {len(metadata) if metadata is not None else 'Metadata is None'}")
+    # <<< 추가된 디버깅 로그 끝 >>>
 else:
     st.error("Azure Blob Storage 연결 실패로 벡터 DB를 로드할 수 없습니다. 파일 학습 및 검색 기능이 제한될 수 있습니다.")
     print("CRITICAL: Cannot load vector DB due to Blob client initialization failure (main section).")
 
 
 # --- 규칙 파일 로드 ---
-# (규칙 파일 로드 로직은 이전과 동일 - 최신 프롬프트 사용)
 @st.cache_data
 def load_prompt_rules_cached():
-    # 사용자가 제공한 프롬프트 규칙을 파일에서 읽거나, 없을 경우 기본값 사용
-    # (이 부분은 이전 코드와 동일하게 유지, 사용자가 직접 파일을 수정하는 것을 가정)
+    # 이전에 제공된 프롬프트 내용으로 가정 (사용자가 관리하는 .streamlit/prompt_rules.txt 파일)
+    # 실제 배포 시 이 파일이 정확히 반영되어야 합니다.
+    # 여기서는 기본값을 가장 최근에 논의된 버전으로 두겠습니다.
     default_rules = """1.우선 기준
     1.1. 모든 답변은 MFDS 규정을 최우선으로 하며, 그 다음은 사내 SOP를 기준으로 삼습니다.
     1.2. 규정/법령 위반 또는 회색지대의 경우, 관련 문서명, 조항번호, 조항내용과 함께 명확히 경고해야 합니다.
@@ -610,38 +593,62 @@ def load_prompt_rules_cached():
 2.응답 방식
     2.1. 존댓말을 사용하며, 전문적이고 친절한 어조로 답변합니다.
     2.2. 모든 답변은 논리적 구조, 높은 정확성, 실용성, 예시 및 설명 포함 등 전문가 수준을 유지합니다.
+    2.3. 번역 시, 일반적인 번역체 대신 **한국 제약 산업 및 GMP 규정/가이드라인(MFDS, PIC/S, ICH 등)에서 통용되는 표준 전문 용어**를 사용하여 번역해야 합니다. (아래 '주요 번역 용어 가이드' 참고)
 3.기능 제한 및 파일 처리
-    3.1. 다루는 주제: SOP, GMP 가이드라인(FDA, PIC/S, EU-GMP, cGMP, MFDS 등), DI 규정, 외국 규정 번역 등 업무 관련 내용.
+    3.1. 다루는 주제: SOP, GMP 가이드라인(FDA, PIC/S, EU-GMP, cGMP, MFDS 등), DI 규정, 외국 규정 번역 등 업무 관련 내용 및 사용자가 첨부한 파일의 내용 분석 (요약, 설명, 비교 등).
     3.2. 파일 첨부 시 처리:
         - 사용자가 파일을 첨부하여 질문하는 경우, 해당 파일 내용을 최우선으로 분석하고 참고하여 답변해야 합니다.
-        - 질문 유형이 번역이 아니더라도, 파일 내용을 기반으로 요약, 설명, 비교 등의 답변을 생성해야 합니다.
-        - 사용자가 '전체 번역'을 요청하는 경우, 문서가 너무 길면 전체 번역 대신 주요 내용 요약 및 번역을 제공하거나, 특정 부분을 지정하여 질문하도록 안내합니다. (추가된 규칙)
+        - 사용자가 '전체 번역'을 명시적으로 요청하는 경우, 다른 모든 규칙(특히 간결성 규칙)에 우선하여 첨부된 문서의 내용을 처음부터 끝까지 순서대로 번역해야 합니다. 번역 결과는 모델의 최대 출력 토큰(16384 토큰) 내에서 생성되며, 내용이 길 경우 번역이 중간에 완료될 수 있습니다.
+        - 번역 요청이 아니더라도, 파일 내용을 기반으로 질문에 맞춰 요약, 설명, 비교 등의 답변을 생성해야 합니다.
         - 만약 파일 내용이 기존 MFDS 규정이나 사내 SOP와 상충될 가능성이 있다면, 그 점을 명확히 언급하고 사용자에게 확인을 요청해야 합니다. (예: "첨부해주신 문서의 내용은 현재 SOP와 일부 차이가 있을 수 있습니다. 확인이 필요합니다.")
-    3.3. 사용자가 파일을 첨부하고 해당 파일에 대해 질문하는 경우를 제외하고, 그 외 개인적인 질문, 뉴스, 여가 등 업무와 직접 관련 없는 질문은 “업무 관련 질문만 처리합니다.”로 간결히 응답합니다. (수정된 규칙)
+    3.3. 사용자가 파일을 첨부하고 해당 파일의 내용에 대해 질문하는 경우는 업무 관련 질문으로 간주합니다. 이 경우를 제외하고, 개인적인 질문, 뉴스, 여가 등 업무와 직접 관련 없는 질문은 “업무 관련 질문만 처리합니다.”로 간결히 응답합니다.
 4.챗봇 소개 안내
-    4.1. 사용자가 인사하거나 기능을 물을 경우, 본 챗봇의 역할과 처리 가능한 업무 범위를 간단히 소개합니다.
+    4.1. 사용자가 인사하거나 기능을 물을 경우, 본 챗봇의 역할("한국 제약 산업의 DI/GMP 규정 및 용어에 능통한 전문가 챗봇")과 처리 가능한 업무 범위를 간단히 소개합니다.
 5.표현 및 형식 규칙
     5.1. Markdown 스타일 강조는 사용하지 않습니다.
     5.2. 번호 항목은 동일한 서식(글꼴 크기와 굵기)으로 통일합니다.
-    5.3. 답변은 표, 요약, 핵심 정리 중심으로 간결하게 구성합니다."""
-
+    5.3. 답변은 표, 요약, 핵심 정리 중심으로 간결하게 구성합니다. (단, '전체 번역' 요청 시에는 규칙 3.2가 우선)
+6. 주요 번역 용어 가이드 (번역 시 최우선 참고)
+    - Compliant / Compliance: 규정 준수
+    - GxP: Good x Practice (GMP, GLP, GCP 등 우수 관리 기준)
+    - Computerized System: 컴퓨터화 시스템
+    - Risk-Based Approach: 위험 기반 접근법
+    - Validation: 밸리데이션
+    - Verification: 검증
+    - Qualification: 적격성 평가
+    - Commissioning: 커미셔닝
+    - Specification: 규격 / 기준 / 명세서 (문맥에 맞게)
+    - Design: 설계
+    - Quality Risk Management (QRM): 품질 위험 관리 (ICH Q9 참고)
+    - Quality by Design (QbD): 설계 기반 품질 고도화 (ICH Q8 참고)
+    - Pharmaceutical Quality System (PQS): 의약품 품질 시스템 (ICH Q10 참고)
+    - Process Validation (PV): 공정 밸리데이션
+    - Process Analytical Technology (PAT): 공정 분석 기술
+    - Critical Process Parameter (CPP): 중요 공정 변수
+    - Standard Operating Procedure (SOP): 표준작업절차서
+    - Good Manufacturing Practice (GMP): 의약품 제조 및 품질관리 기준
+    - Regulatory: 규제 / 규정의
+    - Authority / Agency: 규제 당국 / 기관 (예: FDA, EMA, MFDS)
+    - Lifecycle: 수명 주기 / 라이프사이클
+    - Data Integrity (DI): 데이터 완전성
+    # (필요에 따라 이 목록에 중요한 제약 용어를 계속 추가해주세요)
+"""
     if os.path.exists(RULES_PATH_REPO):
         try:
             with open(RULES_PATH_REPO, "r", encoding="utf-8") as f: rules_content = f.read()
             print(f"Prompt rules loaded successfully from '{RULES_PATH_REPO}'.")
             return rules_content
         except Exception as e:
-            st.warning(f"'{RULES_PATH_REPO}' 파일 로드 중 오류: {e}. 기본 규칙을 사용합니다.")
-            print(f"WARNING: Error loading prompt rules from '{RULES_PATH_REPO}': {e}")
-            return default_rules
+            st.warning(f"'{RULES_PATH_REPO}' 파일 로드 중 오류: {e}. 위 명시된 기본 규칙을 사용합니다.")
+            print(f"WARNING: Error loading prompt rules from '{RULES_PATH_REPO}': {e}. Using default rules defined in code.")
+            return default_rules # 명시적으로 기본 규칙 반환
     else:
-        print(f"WARNING: Prompt rules file not found at '{RULES_PATH_REPO}'. Using default rules.")
-        return default_rules
+        print(f"WARNING: Prompt rules file not found at '{RULES_PATH_REPO}'. Using default rules defined in code.")
+        return default_rules # 명시적으로 기본 규칙 반환
 
 PROMPT_RULES_CONTENT = load_prompt_rules_cached()
 
 # --- 텍스트 처리 함수들 ---
-# (extract_text_from_file, chunk_text_into_pieces, get_text_embedding, search_similar_chunks 등 이전과 동일)
 def extract_text_from_file(uploaded_file_obj):
     ext = os.path.splitext(uploaded_file_obj.name)[1].lower(); text_content = ""
     try:
@@ -651,10 +658,10 @@ def extract_text_from_file(uploaded_file_obj):
         elif ext == ".docx":
             with io.BytesIO(file_bytes) as doc_io: doc = docx.Document(doc_io); text_content = "\n".join(para.text for para in doc.paragraphs)
         elif ext in (".xlsx", ".xlsm"):
-            with io.BytesIO(file_bytes) as excel_io: df = pd.read_excel(excel_io, sheet_name=None) # 모든 시트 읽기
+            with io.BytesIO(file_bytes) as excel_io: df = pd.read_excel(excel_io, sheet_name=None)
             text_content = ""
             for sheet_name, sheet_df in df.items():
-                 text_content += f"--- 시트: {sheet_name} ---\n{sheet_df.to_string(index=False)}\n\n" # 시트 이름과 함께 내용 추가
+                 text_content += f"--- 시트: {sheet_name} ---\n{sheet_df.to_string(index=False)}\n\n"
         elif ext == ".csv":
             with io.BytesIO(file_bytes) as csv_io:
                 try: df = pd.read_csv(csv_io)
@@ -669,7 +676,7 @@ def extract_text_from_file(uploaded_file_obj):
         return ""
     return text_content.strip()
 
-def chunk_text_into_pieces(text_to_chunk, chunk_size=500): # 청크 크기는 임베딩 모델에 맞게 조절 가능
+def chunk_text_into_pieces(text_to_chunk, chunk_size=500):
     if not text_to_chunk or not text_to_chunk.strip(): return [];
     chunks_list, current_buffer = [], ""
     for line in text_to_chunk.split("\n"):
@@ -714,25 +721,43 @@ def get_text_embedding(text_to_embed):
         print(f"UNEXPECTED ERROR during embedding: {e}\n{traceback.format_exc()}")
         return None
 
-def search_similar_chunks(query_text, k_results=5):
-    if index is None or index.ntotal == 0 or not metadata:
-        print("Search not possible: Index is empty or metadata is missing.")
+def search_similar_chunks(query_text, k_results=3): # <<< k_results 기본값 수정 가능
+    # <<< 추가된 디버깅 로그 시작 >>>
+    print(f"DEBUG search_similar_chunks: Called with query '{query_text[:30]}...', k_results={k_results}")
+    if index is None:
+        print("DEBUG search_similar_chunks: FAISS index is None.")
         return []
+    if index.ntotal == 0:
+        print("DEBUG search_similar_chunks: FAISS index is empty (ntotal=0).")
+        return []
+    if not metadata:
+        print("DEBUG search_similar_chunks: Metadata is empty.")
+        return []
+    # <<< 추가된 디버깅 로그 끝 >>>
+
     print(f"Searching for similar chunks for query: '{query_text[:30]}...'")
     query_vector = get_text_embedding(query_text)
     if query_vector is None:
-        print("Failed to get query vector for similarity search.")
+        print("DEBUG search_similar_chunks: Failed to get query vector.")
         return []
     try:
         actual_k = min(k_results, index.ntotal)
         if actual_k == 0 :
-            print("No items in index to search.")
+            print("DEBUG search_similar_chunks: No items in index to search (actual_k=0).")
             return []
 
         distances, indices_found = index.search(np.array([query_vector]).astype("float32"), actual_k)
+        # <<< 추가된 디버깅 로그 시작 >>>
+        print(f"DEBUG search_similar_chunks: FAISS search distances: {distances}")
+        print(f"DEBUG search_similar_chunks: FAISS search indices_found: {indices_found}")
+        # <<< 추가된 디버깅 로그 끝 >>>
         valid_indices = [i for i in indices_found[0] if 0 <= i < len(metadata)]
         results = [metadata[i]["content"] for i in valid_indices]
         print(f"Similarity search found {len(results)} relevant chunks.")
+        # <<< 추가된 디버깅 로그 시작 >>>
+        # for i, res_chunk in enumerate(results):
+        #     print(f"DEBUG search_similar_chunks: Result chunk {i+1} (first 50 chars): {res_chunk[:50]}")
+        # <<< 추가된 디버깅 로그 끝 >>>
         return results
     except Exception as e:
         st.error(f"유사도 검색 중 오류: {e}")
@@ -741,7 +766,6 @@ def search_similar_chunks(query_text, k_results=5):
 
 
 # --- 문서 추가, 원본 저장, 사용량 로깅 함수 ---
-# (add_document_to_vector_db_and_blob, save_original_file_to_blob, log_openai_api_usage_to_blob 함수는 이전과 동일)
 def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chunks, _container_client):
     global index, metadata
     if not text_chunks: st.warning(f"'{uploaded_file_obj.name}' 파일에서 처리할 내용이 없습니다."); return False
@@ -878,7 +902,7 @@ with chat_interface_tab:
     if send_query_button and user_query_input.strip():
         if not openai_client:
             st.error("OpenAI 서비스가 준비되지 않아 답변을 생성할 수 없습니다. 관리자에게 문의하세요.")
-        elif not tokenizer: # Tiktoken 로드 실패 시 처리
+        elif not tokenizer: 
              st.error("Tiktoken 라이브러리 로드 실패. 답변을 생성할 수 없습니다.")
         else:
             timestamp_now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -902,7 +926,7 @@ with chat_interface_tab:
                         query_tokens = len(tokenizer.encode(user_query_input))
                     except Exception as e:
                         st.error(f"기본 프롬프트 또는 질문 토큰화 중 오류: {e}")
-                        raise # 오류 발생 시 중단
+                        raise 
 
                     print(f"DEBUG: 기본 프롬프트 구조 토큰: {base_tokens}")
                     print(f"DEBUG: 사용자 질문 토큰: {query_tokens}")
@@ -916,19 +940,28 @@ with chat_interface_tab:
                          print("WARNING: No tokens left for context after accounting for rules and query.")
                          context_string_for_llm = "참고할 컨텍스트를 포함할 수 없습니다 (토큰 제한)."
                     else:
-                        # --- 컨텍스트 생성 (파일 내용 우선) ---
+                        # --- <<< 핵심 수정: 컨텍스트 생성 로직 변경 시작 >>> ---
+                        # 1. (항상) 사용자 질문을 기반으로 학습된 벡터 DB에서 관련 내용 검색
+                        print(f"DEBUG: Retrieving context from Vector DB based on query: '{user_query_input[:50]}...'")
+                        retrieved_chunks_from_db = search_similar_chunks(user_query_input, k_results=3) # k_results는 필요에 따라 조절
+                        if retrieved_chunks_from_db:
+                            context_chunks_for_prompt.extend(retrieved_chunks_from_db)
+                            print(f"DEBUG: Retrieved {len(retrieved_chunks_from_db)} chunks from Vector DB.")
+                        else:
+                            print(f"DEBUG: No relevant chunks found in Vector DB for query.")
+
+                        # 2. (선택적) 사용자가 채팅 중 파일을 첨부했다면, 해당 파일 내용도 컨텍스트에 추가
                         if uploaded_chat_file_runtime:
-                            print(f"Processing uploaded file: {uploaded_chat_file_runtime.name}")
+                            print(f"DEBUG: Processing additionally uploaded file in chat: {uploaded_chat_file_runtime.name}")
                             temp_file_text = extract_text_from_file(uploaded_chat_file_runtime)
-                            print(f"DEBUG: 추출된 텍스트 (앞 100자): {temp_file_text[:100] if temp_file_text else '추출 실패 또는 빈 파일'}")
-
                             if temp_file_text:
+                                # 여기서는 파일 전체 내용을 추가하지만, 필요시 청킹 또는 요약 가능
                                 context_chunks_for_prompt.append(temp_file_text)
-                                print(f"DEBUG: 파일 내용을 컨텍스트 청크 후보에 추가.")
-                            else: st.info(f"'{uploaded_chat_file_runtime.name}' 파일이 비어있거나 지원하지 않는 내용입니다.")
-
-                        # --- 컨텍스트 생성 (벡터 검색 보조 - 현재는 비활성화) ---
-                        # (필요 시 이 부분에 벡터 검색 로직 추가)
+                                print(f"DEBUG: Added content from additionally uploaded file (full text).")
+                                print(f"DEBUG: Extracted text from uploaded file (first 100 chars): {temp_file_text[:100]}")
+                            else:
+                                st.info(f"채팅 중 첨부된 '{uploaded_chat_file_runtime.name}' 파일이 비어있거나 지원하지 않는 내용입니다.")
+                        # --- <<< 핵심 수정: 컨텍스트 생성 로직 변경 끝 >>> ---
 
                         # --- 최종 컨텍스트 문자열 생성 및 토큰 기반 자르기 ---
                         final_unique_context = list(dict.fromkeys(c for c in context_chunks_for_prompt if c and c.strip()))
@@ -951,13 +984,13 @@ with chat_interface_tab:
                                     context_string_for_llm = tokenizer.decode(truncated_tokens)
                                 except Exception as e:
                                      st.error(f"잘린 토큰 디코딩 중 오류: {e}")
-                                     # 디코딩 실패 시 안전하게 빈 문자열 처리 또는 다른 대체 로직 필요
                                      context_string_for_llm = "[오류: 컨텍스트 디코딩 실패]"
                                 print(f"WARNING: 컨텍스트 토큰 수가 너무 많아 {max_context_tokens} 토큰으로 잘랐습니다.")
                                 print(f"DEBUG: 잘린 컨텍스트 문자열 (앞 100자): {context_string_for_llm[:100]}")
                             else:
                                 context_string_for_llm = full_context_string
-                                print(f"DEBUG: 전체 컨텍스트를 사용합니다.")
+                                print(f"DEBUG: 전체 컨텍스트를 사용합니다. (앞 100자): {context_string_for_llm[:100]}")
+
 
                     # --- 최종 시스템 프롬프트 구성 ---
                     system_prompt_content = prompt_structure.replace('{context}', context_string_for_llm)
@@ -990,7 +1023,6 @@ with chat_interface_tab:
                         print("Logging OpenAI API usage...")
                         log_openai_api_usage_to_blob(user_id_for_log, st.secrets["AZURE_OPENAI_DEPLOYMENT"], chat_completion_response.usage, container_client)
 
-                # ... (이하 에러 처리 및 메시지 추가 로직은 동일) ...
                 except APITimeoutError:
                     assistant_response_content = "죄송합니다, 답변 생성 시간이 초과되었습니다. 질문을 조금 더 간단하게 해주시거나 잠시 후 다시 시도해주세요."
                     st.error(assistant_response_content)
@@ -1019,7 +1051,6 @@ with chat_interface_tab:
 
 if admin_settings_tab:
     with admin_settings_tab:
-        # (관리자 탭 로직은 이전과 동일)
         st.header("⚙️ 관리자 설정")
         st.subheader("👥 가입 승인 대기자")
         if not USERS or not isinstance(USERS, dict):
@@ -1052,19 +1083,18 @@ if admin_settings_tab:
             with st.spinner(f"'{admin_uploaded_file.name}' 파일 처리 및 학습 중..."):
                 extracted_content = extract_text_from_file(admin_uploaded_file)
                 if extracted_content:
-                    content_chunks = chunk_text_into_pieces(extracted_content) # 청킹은 임베딩을 위해 유지
+                    content_chunks = chunk_text_into_pieces(extracted_content) 
                     if content_chunks:
                         original_file_blob_path = save_original_file_to_blob(admin_uploaded_file, container_client)
                         if original_file_blob_path: st.caption(f"원본 파일이 Blob에 '{original_file_blob_path}'로 저장되었습니다.")
                         else: st.warning("원본 파일을 Blob에 저장하는 데 실패했습니다.")
 
-                        # 벡터 DB 추가 로직은 임베딩 모델 기반이므로 content_chunks 사용
                         if add_document_to_vector_db_and_blob(admin_uploaded_file, extracted_content, content_chunks, container_client):
                             st.success(f"'{admin_uploaded_file.name}' 파일 학습 및 Azure Blob Storage에 업데이트 완료!")
                         else: st.error(f"'{admin_uploaded_file.name}' 학습 또는 Blob 업데이트 중 오류가 발생했습니다.")
                     else: st.warning(f"'{admin_uploaded_file.name}' 파일에서 유의미한 청크를 생성하지 못했습니다.")
                 else: st.warning(f"'{admin_uploaded_file.name}' 파일이 비어있거나 지원하지 않는 내용입니다.")
-            st.rerun() # 처리 후 자동 새로고침
+            st.rerun() 
         elif admin_uploaded_file and not container_client:
             st.error("Azure Blob 클라이언트가 준비되지 않아 파일을 업로드하고 학습할 수 없습니다.")
         st.markdown("---")
@@ -1074,12 +1104,10 @@ if admin_settings_tab:
             usage_data_from_blob = load_data_from_blob(USAGE_LOG_BLOB_NAME, container_client, "API 사용량 로그", default_value=[])
             if usage_data_from_blob and isinstance(usage_data_from_blob, list) and len(usage_data_from_blob) > 0 :
                 df_usage_stats=pd.DataFrame(usage_data_from_blob)
-                # 데이터프레임 컬럼 존재 여부 확인 및 기본값 설정
                 for col in ["total_tokens", "prompt_tokens", "completion_tokens"]:
                      if col not in df_usage_stats.columns:
                          df_usage_stats[col] = 0
 
-                # 토큰 컬럼 숫자형 변환 및 NaN 처리
                 token_cols = ["total_tokens", "prompt_tokens", "completion_tokens"]
                 for col in token_cols:
                     df_usage_stats[col] = pd.to_numeric(df_usage_stats[col], errors='coerce').fillna(0)
@@ -1091,16 +1119,15 @@ if admin_settings_tab:
                 token_cost_per_unit = 0.0
                 try: token_cost_per_unit=float(st.secrets.get("TOKEN_COST","0"))
                 except (ValueError, TypeError): pass
-                st.metric("예상 비용 (USD)", f"${total_tokens_used * token_cost_per_unit:.4f}") # Use float for calc
+                st.metric("예상 비용 (USD)", f"${total_tokens_used * token_cost_per_unit:.4f}")
 
                 if "timestamp" in df_usage_stats.columns:
-                    # timestamp 컬럼이 datetime 객체가 아닐 경우 변환 시도
                     try:
                          df_usage_stats['timestamp'] = pd.to_datetime(df_usage_stats['timestamp'])
                          st.dataframe(df_usage_stats.sort_values(by="timestamp",ascending=False), use_container_width=True)
                     except Exception as e:
                          print(f"Warning: Could not sort usage log by timestamp due to conversion error: {e}")
-                         st.dataframe(df_usage_stats, use_container_width=True) # 변환 실패 시 원본 표시
+                         st.dataframe(df_usage_stats, use_container_width=True)
                 else:
                     st.dataframe(df_usage_stats, use_container_width=True)
             else: st.info("기록된 API 사용량 데이터가 Blob에 없거나 비어있습니다.")
@@ -1113,7 +1140,6 @@ if admin_settings_tab:
                 blob_list_display = []
                 count = 0
                 max_blobs_to_show = 100
-                # Blob 목록을 가져와서 수정 시간으로 정렬 (내림차순)
                 blobs_sorted = sorted(container_client.list_blobs(), key=lambda b: b.last_modified, reverse=True)
 
                 for blob_item in blobs_sorted:
@@ -1128,7 +1154,7 @@ if admin_settings_tab:
 
                 if blob_list_display:
                     df_blobs_display = pd.DataFrame(blob_list_display)
-                    st.dataframe(df_blobs_display, use_container_width=True) # 이미 정렬됨
+                    st.dataframe(df_blobs_display, use_container_width=True) 
                 else: st.info("Azure Blob Storage에 파일이 없습니다.")
             except Exception as e:
                 st.error(f"Azure Blob 파일 목록 조회 중 오류: {e}")
