@@ -67,7 +67,7 @@ USAGE_LOG_BLOB_NAME = "app_logs/usage_log.json"
 AZURE_OPENAI_TIMEOUT = 60.0
 MODEL_MAX_INPUT_TOKENS = 128000
 MODEL_MAX_OUTPUT_TOKENS = 16384
-BUFFER_TOKENS = 500 
+BUFFER_TOKENS = 500
 TARGET_INPUT_TOKENS_FOR_PROMPT = MODEL_MAX_INPUT_TOKENS - MODEL_MAX_OUTPUT_TOKENS - BUFFER_TOKENS
 
 
@@ -174,6 +174,7 @@ if openai_client:
 
 # --- 데이터 로드/저장 유틸리티 함수 (Blob 연동) ---
 def load_data_from_blob(blob_name, _container_client, data_description="데이터", default_value=None):
+    # ... (이전과 동일) ...
     if not _container_client:
         print(f"ERROR: Blob Container client is None for load_data_from_blob ('{data_description}'). Returning default.")
         return default_value if default_value is not None else {}
@@ -212,6 +213,7 @@ def load_data_from_blob(blob_name, _container_client, data_description="데이�
         return default_value if default_value is not None else {}
 
 def save_data_to_blob(data_to_save, blob_name, _container_client, data_description="데이터"):
+    # ... (이전과 동일) ...
     if not _container_client:
         st.error(f"Azure Blob 클라이언트가 준비되지 않아 '{data_description}'를 저장할 수 없습니다.")
         print(f"ERROR: Blob Container client is None, cannot save '{blob_name}'.")
@@ -242,6 +244,7 @@ def save_data_to_blob(data_to_save, blob_name, _container_client, data_descripti
         return False
 
 def save_binary_data_to_blob(local_file_path, blob_name, _container_client, data_description="바이너리 데이터"):
+    # ... (이전과 동일) ...
     if not _container_client:
         st.error(f"Azure Blob 클라이언트가 준비되지 않아 '{data_description}' 바이너리 데이터를 저장할 수 없습니다.")
         print(f"ERROR: Blob Container client is None, cannot save binary '{blob_name}'.")
@@ -267,6 +270,7 @@ def save_binary_data_to_blob(local_file_path, blob_name, _container_client, data
         return False
 
 # --- 사용자 정보 로드 ---
+# ... (이전과 동일) ...
 USERS = {}
 if container_client:
     USERS = load_data_from_blob(USERS_BLOB_NAME, container_client, "사용자 정보", default_value={})
@@ -288,6 +292,7 @@ else:
     USERS = {"admin": {"name": "관리자(연결실패)", "department": "시스템", "password_hash": generate_password_hash("fallback"), "approved": True, "role": "admin"}}
 
 # --- 쿠키 매니저 및 세션 상태 초기화 (안정성 강화 버전) ---
+# ... (이전과 동일, 안정성 강화 로직 유지) ...
 cookies = None
 cookie_manager_ready = False
 print(f"Attempting to load COOKIE_SECRET from st.secrets: {st.secrets.get('COOKIE_SECRET')}")
@@ -298,7 +303,7 @@ try:
         print("ERROR: COOKIE_SECRET is not set or empty in st.secrets.")
     else:
         cookies = EncryptedCookieManager(
-            prefix="gmp_chatbot_auth_v5_0/", # 일관된 prefix 사용
+            prefix="gmp_chatbot_auth_v5_0/",
             password=cookie_secret_key
         )
         try:
@@ -353,16 +358,16 @@ if "authenticated" not in st.session_state:
                             else:
                                 print("User data in cookie is empty or invalid. Clearing auth state for cookie.")
                                 st.session_state["authenticated"] = False
-                                if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(clear_all=True) # clear_all 추가 고려
+                                if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save()
                         except json.JSONDecodeError:
                             print("ERROR: Failed to decode user JSON from cookie. Clearing auth state for cookie.")
                             st.session_state["authenticated"] = False
-                            if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(clear_all=True) # clear_all 추가 고려
+                            if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save()
                     else:
                         print("Session timeout detected from cookie. Clearing auth state for cookie.")
                         st.session_state["authenticated"] = False
                         st.session_state["messages"] = []
-                        if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(clear_all=True) # clear_all 추가 고려
+                        if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save()
                 else:
                     print("Authenticated cookie not set to 'true'.")
                     st.session_state["authenticated"] = False
@@ -380,7 +385,7 @@ if "messages" not in st.session_state:
     st.session_state["messages"] = []
     print("Double check: Initializing messages as it was not in session_state before login UI.")
 
-if cookies and not cookie_manager_ready: # 로그인 UI 표시 전, 쿠키 매니저 준비 상태 재확인
+if cookies and not cookie_manager_ready:
     try:
         if cookies.ready():
             cookie_manager_ready = True
@@ -392,7 +397,7 @@ if cookies and not cookie_manager_ready: # 로그인 UI 표시 전, 쿠키 매�
 
 # --- 로그인 UI 및 로직 ---
 if not st.session_state.get("authenticated", False):
-    # ... (기존 로그인 UI 코드, 단 쿠키 저장/삭제 시 cookie_manager_ready 또는 cookies.ready() 재확인) ...
+    # ... (이전과 동일한 로그인 UI) ...
     st.markdown("""
     <div class="login-page-header-container">
       <span class="login-page-main-title">유앤생명과학 GMP/SOP 업무 가이드 봇</span>
@@ -426,7 +431,7 @@ if not st.session_state.get("authenticated", False):
                     st.session_state["user"] = user_data_login
                     st.session_state["messages"] = []
                     print(f"Login successful for user '{uid}'. Chat messages cleared.")
-                    if cookies and cookies.ready(): # 쿠키 저장 전 ready 재확인
+                    if cookies and cookies.ready():
                         try:
                             cookies["authenticated"] = "true"; cookies["user"] = json.dumps(user_data_login)
                             cookies["login_time"] = str(time.time()); cookies.save()
@@ -452,11 +457,11 @@ if not st.session_state.get("authenticated", False):
                         st.success("가입 신청 완료! 관리자 승인 후 로그인 가능합니다.")
     st.stop()
 
-
 # --- 인증 후 메인 애플리케이션 로직 ---
 current_user_info = st.session_state.get("user", {})
 
 # --- 헤더 (로고, 버전, 로그아웃 버튼) ---
+# ... (이전과 동일) ...
 top_cols_main = st.columns([0.7, 0.3])
 with top_cols_main[0]:
     if os.path.exists(COMPANY_LOGO_PATH_REPO):
@@ -465,13 +470,13 @@ with top_cols_main[0]:
             st.markdown(f"""
             <div class="logo-container">
                 <img src="data:image/png;base64,{logo_b64}" class="logo-image" width="150">
-                <span class="version-text">ver 0.9.4 (Source Refinement)</span>
-            </div>""", unsafe_allow_html=True) # 버전 업데이트
+                <span class="version-text">ver 0.9.5 (Admin Upload Fix)</span>
+            </div>""", unsafe_allow_html=True)
         else:
-            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.4 (Source Refinement)</span></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.5 (Admin Upload Fix)</span></div>""", unsafe_allow_html=True)
     else:
         print(f"WARNING: Company logo file not found at {COMPANY_LOGO_PATH_REPO}")
-        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.4 (Source Refinement)</span></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.5 (Admin Upload Fix)</span></div>""", unsafe_allow_html=True)
 
 with top_cols_main[1]:
     st.markdown('<div style="text-align: right;">', unsafe_allow_html=True)
@@ -480,13 +485,12 @@ with top_cols_main[1]:
         st.session_state["user"] = {}
         st.session_state["messages"] = []
         print("Logout successful. Chat messages cleared.")
-        if cookies and cookies.ready(): # 쿠키 삭제 전 ready 재확인
+        if cookies and cookies.ready():
              try:
-                 # clear_all=True 옵션은 EncryptedCookieManager에 없을 수 있음. 개별 삭제로 변경.
                  if "authenticated" in cookies: del cookies["authenticated"]
                  if "user" in cookies: del cookies["user"]
                  if "login_time" in cookies: del cookies["login_time"]
-                 cookies.save() # 변경사항 저장
+                 cookies.save()
                  print("Cookies cleared on logout.")
              except Exception as e_logout_cookie:
                  print(f"ERROR: Failed to clear cookies on logout: {e_logout_cookie}")
@@ -496,6 +500,7 @@ with top_cols_main[1]:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # --- 메인 앱 제목 (로그인 후) ---
+# ... (이전과 동일) ...
 st.markdown("""
 <div class="main-app-title-container">
   <span class="main-app-title">유앤생명과학 GMP/SOP 업무 가이드 봇</span>
@@ -504,23 +509,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 벡터 DB 로드 (Azure Blob Storage 기반) ---
+# ... (이전과 동일, current_embedding_dimension 사용 및 차원 검증 로직 포함) ...
 @st.cache_resource
 def load_vector_db_from_blob_cached(_container_client):
     if not _container_client:
         print("ERROR: Blob Container client is None for load_vector_db_from_blob_cached.")
-        return faiss.IndexFlatL2(1536), [] # 기본 차원값 유지
-    # 실제 임베딩 모델의 차원에 맞춰 FAISS 인덱스 초기화 (text-embedding-3-small 기본은 1536)
-    # 만약 다른 차원을 사용한다면 이 값을 해당 차원 수로 변경해야 합니다.
-    # 예: text-embedding-3-large 기본은 3072
-    # 예: text-embedding-3-small (512 dim API 요청 시) -> 512
-    current_embedding_dimension = 1536 # 현재는 text-embedding-3-small 기본값 사용 가정
+        return faiss.IndexFlatL2(1536), []
+    current_embedding_dimension = 1536 # text-embedding-3-small 기본값
     idx, meta = faiss.IndexFlatL2(current_embedding_dimension), []
     print(f"Attempting to load vector DB from Blob: '{INDEX_BLOB_NAME}', '{METADATA_BLOB_NAME}' with dimension {current_embedding_dimension}")
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             local_index_path = os.path.join(tmpdir, os.path.basename(INDEX_BLOB_NAME))
             local_metadata_path = os.path.join(tmpdir, os.path.basename(METADATA_BLOB_NAME))
-
             index_blob_client = _container_client.get_blob_client(INDEX_BLOB_NAME)
             if index_blob_client.exists():
                 print(f"Downloading '{INDEX_BLOB_NAME}'...")
@@ -532,24 +533,23 @@ def load_vector_db_from_blob_cached(_container_client):
                         idx = faiss.read_index(local_index_path)
                         if idx.d != current_embedding_dimension:
                             print(f"WARNING: Loaded FAISS index dimension ({idx.d}) does not match expected dimension ({current_embedding_dimension}). Re-initializing.")
-                            idx = faiss.IndexFlatL2(current_embedding_dimension) # 차원 불일치 시 새로 생성
-                            meta = [] # 메타데이터도 함께 초기화
+                            idx = faiss.IndexFlatL2(current_embedding_dimension)
+                            meta = []
                         else:
                             print(f"'{INDEX_BLOB_NAME}' loaded successfully from Blob Storage. Dimension: {idx.d}")
                     except Exception as e_faiss_read:
                         print(f"ERROR reading FAISS index: {e_faiss_read}. Re-initializing index.")
                         idx = faiss.IndexFlatL2(current_embedding_dimension)
-                        meta = [] # 메타데이터도 함께 초기화
-
+                        meta = []
                 else:
                     print(f"WARNING: '{INDEX_BLOB_NAME}' is empty in Blob. Using new index.")
-                    idx = faiss.IndexFlatL2(current_embedding_dimension) # 명시적으로 초기화
+                    idx = faiss.IndexFlatL2(current_embedding_dimension)
             else:
                 print(f"WARNING: '{INDEX_BLOB_NAME}' not found in Blob Storage. New index will be used/created.")
-                idx = faiss.IndexFlatL2(current_embedding_dimension) # 명시적으로 초기화
+                idx = faiss.IndexFlatL2(current_embedding_dimension)
 
             metadata_blob_client = _container_client.get_blob_client(METADATA_BLOB_NAME)
-            if metadata_blob_client.exists() and idx.ntotal > 0: # 인덱스가 유효할 때만 메타데이터 로드 시도
+            if metadata_blob_client.exists() and idx.ntotal > 0:
                 print(f"Downloading '{METADATA_BLOB_NAME}'...")
                 with open(local_metadata_path, "wb") as download_file:
                     download_stream = metadata_blob_client.download_blob(timeout=60)
@@ -559,23 +559,23 @@ def load_vector_db_from_blob_cached(_container_client):
                 else:
                     meta = []
                     print(f"WARNING: '{METADATA_BLOB_NAME}' is empty in Blob.")
-            elif idx.ntotal == 0: # 인덱스가 비어있거나 새로 생성되었다면 메타데이터도 초기화
+            elif idx.ntotal == 0:
                  print(f"WARNING: Index is empty or re-initialized, starting with empty metadata.")
                  meta = []
-            else: # 메타데이터 파일이 없는 경우
+            else:
                 print(f"WARNING: '{METADATA_BLOB_NAME}' not found in Blob Storage. Starting with empty metadata.")
                 meta = []
     except AzureError as ae:
         st.error(f"Azure Blob에서 벡터DB 로드 중 Azure 서비스 오류: {ae}")
         print(f"AZURE ERROR loading vector DB from Blob: {ae}\n{traceback.format_exc()}")
-        idx = faiss.IndexFlatL2(current_embedding_dimension); meta = [] # 오류 시 안전하게 초기화
+        idx = faiss.IndexFlatL2(current_embedding_dimension); meta = []
     except Exception as e:
         st.error(f"Azure Blob에서 벡터DB 로드 중 알 수 없는 오류: {e}")
         print(f"GENERAL ERROR loading vector DB from Blob: {e}\n{traceback.format_exc()}")
-        idx = faiss.IndexFlatL2(current_embedding_dimension); meta = [] # 오류 시 안전하게 초기화
+        idx = faiss.IndexFlatL2(current_embedding_dimension); meta = []
     return idx, meta
 
-index, metadata = faiss.IndexFlatL2(1536), [] # 기본값은 유지하되, load_vector_db_from_blob_cached에서 실제 차원으로 덮어씀
+index, metadata = faiss.IndexFlatL2(1536), []
 if container_client:
     index, metadata = load_vector_db_from_blob_cached(container_client)
     print(f"DEBUG: FAISS index loaded after cache. ntotal: {index.ntotal if index else 'Index is None'}, dimension: {index.d if index else 'N/A'}")
@@ -587,6 +587,7 @@ else:
 # --- 규칙 파일 로드 ---
 @st.cache_data
 def load_prompt_rules_cached():
+    # ... (가장 최근 프롬프트 규칙으로 default_rules 업데이트된 버전) ...
     default_rules = """1.우선 기준
     1.1. 모든 답변은 컨텍스트로 제공된 참고 문서(첨부 파일, 학습된 SOP 등)의 내용을 최우선으로 하며, 그 다음은 MFDS 규정, 그리고 사내 SOP 순서를 기준으로 삼습니다.
     1.2. 규정/법령 위반 또는 회색지대의 경우, 관련 문서명, 조항번호, 조항내용과 함께 명확히 경고해야 합니다.
@@ -619,8 +620,7 @@ def load_prompt_rules_cached():
     - Compliant / Compliance: 규정 준수
     - GxP: Good x Practice (GMP, GLP, GCP 등 우수 관리 기준)
     - Computerized System: 컴퓨터화 시스템
-    - Risk-Based Approach: 위험 기반 접근법
-    # ... (이하 전체 용어 목록)
+    # ... (이하 용어 목록)
     - Data Integrity (DI): 데이터 완전성
     # (필요에 따라 이 목록에 중요한 제약 용어를 계속 추가해주세요)
 """
@@ -636,12 +636,11 @@ def load_prompt_rules_cached():
     else:
         print(f"WARNING: Prompt rules file not found at '{RULES_PATH_REPO}'. Using default rules defined in code.")
         return default_rules
-
 PROMPT_RULES_CONTENT = load_prompt_rules_cached()
 
 # --- 텍스트 처리 함수들 ---
+# ... (extract_text_from_file, chunk_text_into_pieces, get_text_embedding 이전과 동일) ...
 def extract_text_from_file(uploaded_file_obj):
-    # ... (이전과 동일) ...
     ext = os.path.splitext(uploaded_file_obj.name)[1].lower(); text_content = ""
     try:
         uploaded_file_obj.seek(0); file_bytes = uploaded_file_obj.read()
@@ -668,9 +667,7 @@ def extract_text_from_file(uploaded_file_obj):
         return ""
     return text_content.strip()
 
-
 def chunk_text_into_pieces(text_to_chunk, chunk_size=500):
-    # ... (이전과 동일) ...
     if not text_to_chunk or not text_to_chunk.strip(): return [];
     chunks_list, current_buffer = [], ""
     for line in text_to_chunk.split("\n"):
@@ -684,20 +681,16 @@ def chunk_text_into_pieces(text_to_chunk, chunk_size=500):
     if current_buffer.strip(): chunks_list.append(current_buffer.strip())
     return [c for c in chunks_list if c]
 
-
 def get_text_embedding(text_to_embed):
-    # ... (이전과 동일, 단 dimensions 파라미터는 text-embedding-3-small 기본값 사용 시 불필요) ...
     if not openai_client or not EMBEDDING_MODEL:
         print("ERROR: OpenAI client or embedding model not ready for get_text_embedding (called).")
         return None
     if not text_to_embed or not text_to_embed.strip(): return None
-    print(f"Requesting embedding for text: '{text_to_embed[:30]}...' (Model: {EMBEDDING_MODEL})") # 모델명 로그 추가
+    print(f"Requesting embedding for text: '{text_to_embed[:30]}...' (Model: {EMBEDDING_MODEL})")
     try:
-        # text-embedding-3-small 기본 차원(1536) 사용 시 dimensions 파라미터 불필요
-        # 만약 다른 차원을 명시적으로 사용하려면 dimensions=원하는차원수 추가
         response = openai_client.embeddings.create(
             input=[text_to_embed],
-            model=EMBEDDING_MODEL, # secrets에서 읽어온 새 모델 배포 이름
+            model=EMBEDDING_MODEL,
             timeout=AZURE_OPENAI_TIMEOUT / 2
         )
         print("Embedding received.")
@@ -723,8 +716,7 @@ def get_text_embedding(text_to_embed):
         print(f"UNEXPECTED ERROR during embedding: {e}\n{traceback.format_exc()}")
         return None
 
-
-# --- <<< 수정된 search_similar_chunks 함수 시작 >>> ---
+# --- <<< 수정된 search_similar_chunks 함수 (딕셔너리 리스트 반환) >>> ---
 def search_similar_chunks(query_text, k_results=3):
     print(f"DEBUG search_similar_chunks: Called with query '{query_text[:30]}...', k_results={k_results}")
     if index is None:
@@ -733,11 +725,11 @@ def search_similar_chunks(query_text, k_results=3):
     if index.ntotal == 0:
         print("DEBUG search_similar_chunks: FAISS index is empty (ntotal=0).")
         return []
-    if not metadata: # metadata가 None이거나 비어있는 경우도 확인
+    if not metadata:
         print("DEBUG search_similar_chunks: Metadata is empty or None.")
         return []
 
-    print(f"Searching for similar chunks for query: '{query_text[:30]}...'") # 기존 로그
+    print(f"Searching for similar chunks for query: '{query_text[:30]}...'")
     query_vector = get_text_embedding(query_text)
     if query_vector is None:
         print("DEBUG search_similar_chunks: Failed to get query vector.")
@@ -754,10 +746,9 @@ def search_similar_chunks(query_text, k_results=3):
 
         results_with_source = []
         if len(indices_found[0]) > 0:
-            for i in indices_found[0]:
-                if 0 <= i < len(metadata):
-                    meta_item = metadata[i]
-                    # "file_name" 키가 없을 경우 "출처 불명"으로, "content" 없을 경우 빈 문자열로 안전하게 처리
+            for i_val in indices_found[0]: # 변수명 변경 i -> i_val
+                if 0 <= i_val < len(metadata):
+                    meta_item = metadata[i_val]
                     results_with_source.append({
                         "source": meta_item.get("file_name", "출처 불명"),
                         "content": meta_item.get("content", "")
@@ -768,12 +759,10 @@ def search_similar_chunks(query_text, k_results=3):
         st.error(f"유사도 검색 중 오류: {e}")
         print(f"ERROR: Similarity search failed: {e}\n{traceback.format_exc()}")
         return []
-# --- <<< 수정된 search_similar_chunks 함수 끝 >>> ---
-
 
 # --- 문서 추가, 원본 저장, 사용량 로깅 함수 ---
+# ... (add_document_to_vector_db_and_blob, save_original_file_to_blob, log_openai_api_usage_to_blob 이전과 동일 - 단, add_document... 함수 내 차원 검증 로직 포함) ...
 def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chunks, _container_client):
-    # ... (이전과 동일) ...
     global index, metadata
     if not text_chunks: st.warning(f"'{uploaded_file_obj.name}' 파일에서 처리할 내용이 없습니다."); return False
     if not _container_client: st.error("Azure Blob 클라이언트가 준비되지 않아 학습 결과를 저장할 수 없습니다."); return False
@@ -791,12 +780,11 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chu
     if not vectors_to_add: st.warning(f"'{uploaded_file_obj.name}' 파일에서 유효한 임베딩을 생성하지 못했습니다."); return False
 
     try:
-        # FAISS 인덱스 차원 확인 및 필요시 재생성 (중요)
         current_embedding_dimension = np.array(vectors_to_add[0]).shape[0]
         if index is None or index.d != current_embedding_dimension:
             print(f"WARNING: FAISS index dimension ({index.d if index else 'None'}) mismatch or index is None. Re-initializing with dimension {current_embedding_dimension}.")
             index = faiss.IndexFlatL2(current_embedding_dimension)
-            metadata = [] # 인덱스 재생성 시 메타데이터도 초기화 (기존 데이터 호환 안 됨)
+            metadata = []
 
         if vectors_to_add: index.add(np.array(vectors_to_add).astype("float32"))
         metadata.extend(new_metadata_entries_for_current_file)
@@ -830,7 +818,6 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chu
         return False
 
 def save_original_file_to_blob(uploaded_file_obj, _container_client):
-    # ... (이전과 동일) ...
     if not _container_client: st.error("Azure Blob 클라이언트가 준비되지 않아 원본 파일을 저장할 수 없습니다."); return None
     try:
         uploaded_file_obj.seek(0)
@@ -849,7 +836,6 @@ def save_original_file_to_blob(uploaded_file_obj, _container_client):
         return None
 
 def log_openai_api_usage_to_blob(user_id_str, model_name_str, usage_stats_obj, _container_client):
-    # ... (이전과 동일) ...
     if not _container_client:
         print("ERROR: Blob Container client is None for API usage log. Skipping log.")
         return
@@ -871,7 +857,6 @@ def log_openai_api_usage_to_blob(user_id_str, model_name_str, usage_stats_obj, _
     if not save_data_to_blob(current_usage_logs, USAGE_LOG_BLOB_NAME, _container_client, "API 사용량 로그"):
         print(f"WARNING: Failed to save API usage log to Blob for user '{user_id_str}'.")
 
-
 # --- 메인 UI 구성 ---
 # (이전과 동일)
 tab_labels_list = ["💬 업무 질문"]
@@ -881,6 +866,7 @@ if current_user_info.get("role") == "admin":
 main_tabs_list = st.tabs(tab_labels_list)
 chat_interface_tab = main_tabs_list[0]
 admin_settings_tab = main_tabs_list[1] if len(main_tabs_list) > 1 else None
+
 
 with chat_interface_tab:
     # (이전과 동일)
@@ -933,8 +919,8 @@ with chat_interface_tab:
                 assistant_response_content = "답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
                 try:
                     print("Step 1: Preparing context and calculating tokens...")
-                    # <<< 수정된 context_chunks_for_prompt 초기화 (이제 딕셔너리 리스트를 담을 것) >>>
-                    context_items_for_prompt = [] # 변경: 이제 딕셔너리({"source": "...", "content": "..."})를 담는 리스트
+                    # <<< 수정된 context_items_for_prompt 초기화 >>>
+                    context_items_for_prompt = []
                     temp_file_text = ""
 
                     # --- 기본 프롬프트 및 질문 토큰 계산 ---
@@ -962,9 +948,9 @@ with chat_interface_tab:
                         # --- <<< 수정된 컨텍스트 생성 로직 (출처 포함) 시작 >>> ---
                         # 1. (항상) 사용자 질문을 기반으로 학습된 벡터 DB에서 관련 내용 검색
                         print(f"DEBUG: Retrieving context from Vector DB based on query: '{user_query_input[:50]}...'")
-                        retrieved_items_from_db = search_similar_chunks(user_query_input, k_results=3) # 이제 딕셔너리 리스트 반환
+                        retrieved_items_from_db = search_similar_chunks(user_query_input, k_results=3)
                         if retrieved_items_from_db:
-                            context_items_for_prompt.extend(retrieved_items_from_db) # 딕셔너리 리스트를 그대로 추가
+                            context_items_for_prompt.extend(retrieved_items_from_db)
                             print(f"DEBUG: Retrieved {len(retrieved_items_from_db)} items from Vector DB with source info.")
                         else:
                             print(f"DEBUG: No relevant items found in Vector DB for query.")
@@ -974,7 +960,7 @@ with chat_interface_tab:
                             print(f"DEBUG: Processing additionally uploaded file in chat: {uploaded_chat_file_runtime.name}")
                             temp_file_text = extract_text_from_file(uploaded_chat_file_runtime)
                             if temp_file_text:
-                                context_items_for_prompt.append({ # 딕셔너리 형태로 추가
+                                context_items_for_prompt.append({
                                     "source": f"사용자 첨부 파일: {uploaded_chat_file_runtime.name}",
                                     "content": temp_file_text
                                 })
@@ -989,15 +975,18 @@ with chat_interface_tab:
                             print("DEBUG: No context items found. Will use '현재 참고할 문서가 없습니다.'")
                             context_string_for_llm = "현재 참고할 문서가 없습니다."
                         else:
-                            # content 기준으로 중복 제거 (source는 첫 번째 등장한 것을 따름), 출처 포함하여 포맷팅
                             seen_contents_for_final_context = set()
                             formatted_context_chunks = []
                             for item in context_items_for_prompt:
                                 content_strip = item.get("content", "").strip()
+                                # source 키가 없는 경우 (예: 이전 버전의 context_chunks_for_prompt가 문자열만 담고 있었을 때 호환성) 대비
+                                source_info = item.get('source', '출처 정보 없음') if isinstance(item, dict) else '출처 정보 없음 (이전 형식)'
+                                content_to_add = item.get('content', item if isinstance(item, str) else '') # content 또는 item 자체 (문자열일 경우)
+
                                 if content_strip and content_strip not in seen_contents_for_final_context:
-                                    formatted_context_chunks.append(f"[출처: {item.get('source', '출처 불명')}]\n{item.get('content', '')}")
+                                    formatted_context_chunks.append(f"[출처: {source_info}]\n{content_to_add}")
                                     seen_contents_for_final_context.add(content_strip)
-                            
+
                             if not formatted_context_chunks:
                                 print("DEBUG: No unique context items after filtering. Using '현재 참고할 문서가 없습니다.'")
                                 context_string_for_llm = "현재 참고할 문서가 없습니다."
@@ -1015,7 +1004,7 @@ with chat_interface_tab:
                                     truncated_tokens = full_context_tokens[:max_context_tokens]
                                     try:
                                         context_string_for_llm = tokenizer.decode(truncated_tokens)
-                                        if len(full_context_tokens) > len(truncated_tokens) : # 잘렸는지 확인
+                                        if len(full_context_tokens) > len(truncated_tokens) :
                                             context_string_for_llm += " (...내용 더 있음, 일부 내용이 잘렸을 수 있습니다.)"
                                     except Exception as e:
                                         st.error(f"잘린 토큰 디코딩 중 오류: {e}")
@@ -1025,7 +1014,7 @@ with chat_interface_tab:
                                 else:
                                     context_string_for_llm = full_context_string
                                     print(f"DEBUG: 전체 컨텍스트를 사용합니다. (앞 100자): {context_string_for_llm[:100]}")
-                    
+
                     # --- 최종 시스템 프롬프트 구성 ---
                     system_prompt_content = prompt_structure.replace('{context}', context_string_for_llm)
                     try:
@@ -1085,9 +1074,9 @@ with chat_interface_tab:
 
 if admin_settings_tab:
     with admin_settings_tab:
-        # (관리자 탭 로직은 이전과 동일)
         st.header("⚙️ 관리자 설정")
         st.subheader("👥 가입 승인 대기자")
+        # ... (이전과 동일) ...
         if not USERS or not isinstance(USERS, dict):
             st.warning("사용자 정보를 로드할 수 없거나 형식이 올바르지 않습니다.")
             print(f"WARNING: USERS data is problematic or empty in admin tab. Type: {type(USERS)}")
@@ -1111,30 +1100,52 @@ if admin_settings_tab:
         st.markdown("---")
 
         st.subheader("📁 파일 업로드 및 학습 (Azure Blob Storage)")
-        admin_file_uploader_key = "admin_file_uploader_final_v4_widget"
-        admin_uploaded_file = st.file_uploader("학습할 파일 업로드", type=["pdf","docx","xlsx","xlsm","csv","pptx"], key=admin_file_uploader_key)
+        # <<< 반복 업로드 방지 로직 시작 >>>
+        if 'processed_admin_file_id' not in st.session_state:
+            st.session_state.processed_admin_file_id = None
+
+        admin_file_uploader_key = "admin_file_uploader_final_v4_widget_corrected" # 키 변경으로 상태 초기화 유도 가능성
+        admin_uploaded_file = st.file_uploader(
+            "학습할 파일 업로드",
+            type=["pdf","docx","xlsx","xlsm","csv","pptx"],
+            key=admin_file_uploader_key,
+            # on_change 콜백을 사용하여 파일이 변경될 때 processed_admin_file_id를 리셋할 수 있습니다.
+            # def reset_processed_file():
+            #   st.session_state.processed_admin_file_id = None
+            # on_change=reset_processed_file
+        )
 
         if admin_uploaded_file and container_client:
-            with st.spinner(f"'{admin_uploaded_file.name}' 파일 처리 및 학습 중..."):
-                extracted_content = extract_text_from_file(admin_uploaded_file)
-                if extracted_content:
-                    content_chunks = chunk_text_into_pieces(extracted_content)
-                    if content_chunks:
-                        original_file_blob_path = save_original_file_to_blob(admin_uploaded_file, container_client)
-                        if original_file_blob_path: st.caption(f"원본 파일이 Blob에 '{original_file_blob_path}'로 저장되었습니다.")
-                        else: st.warning("원본 파일을 Blob에 저장하는 데 실패했습니다.")
+            # 현재 업로드된 파일이 이전에 성공적으로 처리된 파일과 다른 경우에만 처리
+            if st.session_state.processed_admin_file_id != admin_uploaded_file.id:
+                with st.spinner(f"'{admin_uploaded_file.name}' 파일 처리 및 학습 중..."):
+                    extracted_content = extract_text_from_file(admin_uploaded_file)
+                    if extracted_content:
+                        content_chunks = chunk_text_into_pieces(extracted_content)
+                        if content_chunks:
+                            original_file_blob_path = save_original_file_to_blob(admin_uploaded_file, container_client)
+                            if original_file_blob_path: st.caption(f"원본 파일이 Blob에 '{original_file_blob_path}'로 저장되었습니다.")
+                            else: st.warning("원본 파일을 Blob에 저장하는 데 실패했습니다.")
 
-                        if add_document_to_vector_db_and_blob(admin_uploaded_file, extracted_content, content_chunks, container_client):
-                            st.success(f"'{admin_uploaded_file.name}' 파일 학습 및 Azure Blob Storage에 업데이트 완료!")
-                        else: st.error(f"'{admin_uploaded_file.name}' 학습 또는 Blob 업데이트 중 오류가 발생했습니다.")
-                    else: st.warning(f"'{admin_uploaded_file.name}' 파일에서 유의미한 청크를 생성하지 못했습니다.")
-                else: st.warning(f"'{admin_uploaded_file.name}' 파일이 비어있거나 지원하지 않는 내용입니다.")
-            st.rerun()
+                            if add_document_to_vector_db_and_blob(admin_uploaded_file, extracted_content, content_chunks, container_client):
+                                st.success(f"'{admin_uploaded_file.name}' 파일 학습 및 Azure Blob Storage에 업데이트 완료!")
+                                st.session_state.processed_admin_file_id = admin_uploaded_file.id # 처리된 파일 ID 저장
+                                st.rerun() # 성공 후 rerun하여 uploader 상태를 어느정도 초기화 유도
+                            else:
+                                st.error(f"'{admin_uploaded_file.name}' 학습 또는 Blob 업데이트 중 오류가 발생했습니다.")
+                                # 실패 시 processed_admin_file_id를 설정하지 않아 재시도 가능하도록 함
+                        else: st.warning(f"'{admin_uploaded_file.name}' 파일에서 유의미한 청크를 생성하지 못했습니다.")
+                    else: st.warning(f"'{admin_uploaded_file.name}' 파일이 비어있거나 지원하지 않는 내용입니다.")
+            elif st.session_state.processed_admin_file_id == admin_uploaded_file.id:
+                 # 이전에 이미 처리된 파일임을 사용자에게 알림 (선택적)
+                 st.caption(f"'{admin_uploaded_file.name}' 파일은 이미 처리되었습니다. 다른 파일을 업로드하거나, 현재 파일을 제거 후 다시 업로드하여 재처리할 수 있습니다.")
         elif admin_uploaded_file and not container_client:
             st.error("Azure Blob 클라이언트가 준비되지 않아 파일을 업로드하고 학습할 수 없습니다.")
+        # <<< 반복 업로드 방지 로직 끝 >>>
         st.markdown("---")
 
         st.subheader("📊 API 사용량 모니터링 (Blob 로그 기반)")
+        # ... (이전과 동일) ...
         if container_client:
             usage_data_from_blob = load_data_from_blob(USAGE_LOG_BLOB_NAME, container_client, "API 사용량 로그", default_value=[])
             if usage_data_from_blob and isinstance(usage_data_from_blob, list) and len(usage_data_from_blob) > 0 :
@@ -1170,6 +1181,7 @@ if admin_settings_tab:
         st.markdown("---")
 
         st.subheader("📂 Azure Blob Storage 파일 목록 (최근 100개)")
+        # ... (이전과 동일) ...
         if container_client:
             try:
                 blob_list_display = []
