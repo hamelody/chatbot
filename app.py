@@ -119,25 +119,31 @@ st.markdown("""
 def get_azure_openai_client_cached():
     print("Attempting to initialize Azure OpenAI client...")
     try:
+        # Streamlit Cloud Secrets에서 API 버전 값을 가져옵니다.
+        # 사용자가 "2024-02-15-preview"로 설정하는 것을 권장합니다.
+        api_version_to_use = st.secrets.get("AZURE_OPENAI_VERSION", "2024-02-15-preview") # 기본값을 더 안정적인 버전으로
+        print(f"DEBUG: Initializing AzureOpenAI client with API version: {api_version_to_use}")
+
         client = AzureOpenAI(
             api_key=st.secrets["AZURE_OPENAI_KEY"],
             azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
-            api_version=st.secrets["AZURE_OPENAI_VERSION"],
+            api_version=api_version_to_use,
             timeout=AZURE_OPENAI_TIMEOUT
         )
         print("Azure OpenAI client initialized successfully.")
         return client
     except KeyError as e:
-        st.error(f"Azure OpenAI 설정 오류: secrets.toml 파일에 '{e.args[0]}' 키가 없습니다. 앱이 정상 동작하지 않을 수 있습니다.")
+        st.error(f"Azure OpenAI 설정 오류: secrets.toml 또는 Streamlit Cloud Secrets에 '{e.args[0]}' 키가 없습니다.")
         print(f"ERROR: Missing Azure OpenAI secret: {e.args[0]}")
         return None
     except Exception as e:
-        st.error(f"Azure OpenAI 클라이언트 초기화 중 심각한 오류 발생: {e}. 앱이 정상 동작하지 않을 수 있습니다.")
+        st.error(f"Azure OpenAI 클라이언트 초기화 중 심각한 오류 발생: {e}.")
         print(f"ERROR: Azure OpenAI client initialization failed: {e}\n{traceback.format_exc()}")
         return None
 
 @st.cache_resource
 def get_azure_blob_clients_cached():
+    # (이전과 동일)
     print("Attempting to initialize Azure Blob Service client...")
     try:
         conn_str = st.secrets["AZURE_BLOB_CONN"]
@@ -147,11 +153,11 @@ def get_azure_blob_clients_cached():
         print(f"Azure Blob Service client and container client for '{container_name}' initialized successfully.")
         return blob_service_client, container_client
     except KeyError as e:
-        st.error(f"Azure Blob Storage 설정 오류: secrets.toml 파일에 '{e.args[0]}' 키가 없습니다. 데이터 기능을 사용할 수 없습니다.")
+        st.error(f"Azure Blob Storage 설정 오류: secrets.toml 또는 Streamlit Cloud Secrets에 '{e.args[0]}' 키가 없습니다.")
         print(f"ERROR: Missing Azure Blob Storage secret: {e.args[0]}")
         return None, None
     except Exception as e:
-        st.error(f"Azure Blob 클라이언트 초기화 중 심각한 오류 발생: {e}. 데이터 기능을 사용할 수 없습니다.")
+        st.error(f"Azure Blob 클라이언트 초기화 중 심각한 오류 발생: {e}.")
         print(f"ERROR: Azure Blob client initialization failed: {e}\n{traceback.format_exc()}")
         return None, None
 
@@ -164,7 +170,7 @@ if openai_client:
         EMBEDDING_MODEL = st.secrets["AZURE_OPENAI_EMBEDDING_DEPLOYMENT"]
         print(f"Embedding model set to: {EMBEDDING_MODEL}")
     except KeyError:
-        st.error("secrets.toml 파일에 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT' 설정이 없습니다. 임베딩 기능을 사용할 수 없습니다.")
+        st.error("secrets.toml 또는 Streamlit Cloud Secrets에 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT' 설정이 없습니다.")
         print("ERROR: Missing AZURE_OPENAI_EMBEDDING_DEPLOYMENT secret.")
         openai_client = None
     except Exception as e:
@@ -297,7 +303,7 @@ print(f"Attempting to load COOKIE_SECRET from st.secrets: {st.secrets.get('COOKI
 try:
     cookie_secret_key = st.secrets.get("COOKIE_SECRET")
     if not cookie_secret_key:
-        st.error("secrets.toml 파일에 'COOKIE_SECRET'이(가) 설정되지 않았거나 비어있습니다. 쿠키 기능을 사용할 수 없습니다.")
+        st.error("secrets.toml 또는 Streamlit Cloud Secrets에 'COOKIE_SECRET'이(가) 설정되지 않았거나 비어있습니다.")
         print("ERROR: COOKIE_SECRET is not set or empty in st.secrets.")
     else:
         cookies = EncryptedCookieManager(
@@ -394,8 +400,8 @@ if cookies and not cookie_manager_ready:
         print(f"WARNING: cookies.ready() call just before login UI check failed: {e_ready_login_ui}")
 
 # --- 로그인 UI 및 로직 ---
+# (이전과 동일)
 if not st.session_state.get("authenticated", False):
-    # (이전과 동일한 로그인 UI)
     st.markdown("""
     <div class="login-page-header-container">
       <span class="login-page-main-title">유앤생명과학 GMP/SOP 업무 가이드 봇</span>
@@ -637,7 +643,7 @@ def load_prompt_rules_cached():
 PROMPT_RULES_CONTENT = load_prompt_rules_cached()
 
 # --- 텍스트 처리 함수들 ---
-# (extract_text_from_file, chunk_text_into_pieces, get_text_embedding 이전과 동일)
+# (extract_text_from_file, chunk_text_into_pieces 이전과 동일)
 def extract_text_from_file(uploaded_file_obj):
     ext = os.path.splitext(uploaded_file_obj.name)[1].lower(); text_content = ""
     try:
@@ -679,12 +685,13 @@ def chunk_text_into_pieces(text_to_chunk, chunk_size=500):
     if current_buffer.strip(): chunks_list.append(current_buffer.strip())
     return [c for c in chunks_list if c]
 
+# --- <<< get_text_embedding 함수에 디버깅 로그 및 예외 처리 강화 >>> ---
 def get_text_embedding(text_to_embed):
     if not openai_client or not EMBEDDING_MODEL:
         print("ERROR: OpenAI client or embedding model not ready for get_text_embedding (called).")
         return None
     if not text_to_embed or not text_to_embed.strip():
-        print("WARNING: Attempted to embed empty or whitespace-only text.")
+        print("WARNING: Attempted to embed empty or whitespace-only text in get_text_embedding.")
         return None
 
     print(f"DEBUG get_text_embedding: Requesting embedding for text (first 50 chars): '{text_to_embed[:50]}...'")
@@ -692,21 +699,41 @@ def get_text_embedding(text_to_embed):
     try:
         response = openai_client.embeddings.create(
             input=[text_to_embed],
-            model=EMBEDDING_MODEL,
+            model=EMBEDDING_MODEL, # 이 값은 st.secrets에서 AZURE_OPENAI_EMBEDDING_DEPLOYMENT로 설정됩니다.
             timeout=AZURE_OPENAI_TIMEOUT / 2
         )
         print("Embedding received.")
         return response.data[0].embedding
     except APIStatusError as ase:
         st.error(f"텍스트 임베딩 생성 중 API 오류 (상태 코드 {ase.status_code}): {ase.message}. 요청 내용을 확인해주세요.")
-        print(f"API STATUS ERROR during embedding (Status {ase.status_code}): {ase.message}")
+        print(f"API STATUS ERROR during embedding (get_text_embedding - Status {ase.status_code}): {ase.message}")
         print(f"DEBUG get_text_embedding: Failing text (first 100 chars): {text_to_embed[:100]}")
+        # Azure API가 반환하는 더 자세한 오류 내용을 포함할 수 있는지 확인
+        if ase.response and ase.response.content:
+            try:
+                error_details = json.loads(ase.response.content.decode('utf-8'))
+                print(f"DEBUG get_text_embedding: Azure API error details: {json.dumps(error_details, indent=2, ensure_ascii=False)}")
+            except Exception as json_e:
+                print(f"DEBUG get_text_embedding: Could not parse Azure API error content as JSON: {json_e}")
+                print(f"DEBUG get_text_embedding: Raw Azure API error content: {ase.response.content}")
+
         return None
-    except Exception as e: # 좀 더 넓은 범위의 예외를 잡아서 로깅
+    except APITimeoutError:
+        st.error("텍스트 임베딩 생성 중 시간 초과가 발생했습니다. 잠시 후 다시 시도해주세요.")
+        print(f"TIMEOUT ERROR during embedding (get_text_embedding): Request for '{text_to_embed[:50]}...' timed out.")
+        return None
+    except APIConnectionError as ace:
+        st.error(f"텍스트 임베딩 생성 중 API 연결 오류가 발생했습니다: {ace}. 네트워크를 확인하거나 잠시 후 다시 시도해주세요.")
+        print(f"API CONNECTION ERROR during embedding (get_text_embedding): {ace}")
+        return None
+    except RateLimitError as rle:
+        st.error(f"텍스트 임베딩 생성 중 API 요청량 제한에 도달했습니다: {rle}. 잠시 후 다시 시도해주세요.")
+        print(f"RATE LIMIT ERROR during embedding (get_text_embedding): {rle}")
+        return None
+    except Exception as e:
         st.error(f"텍스트 임베딩 생성 중 예기치 않은 오류가 발생했습니다: {e}")
         print(f"UNEXPECTED ERROR during embedding (get_text_embedding): {e}\n{traceback.format_exc()}")
         return None
-
 
 # --- <<< 수정된 search_similar_chunks 함수 (딕셔너리 리스트 반환) >>> ---
 def search_similar_chunks(query_text, k_results=3):
@@ -722,7 +749,7 @@ def search_similar_chunks(query_text, k_results=3):
         print("DEBUG search_similar_chunks: Metadata is empty or None.")
         return []
 
-    print(f"Searching for similar chunks for query: '{query_text[:30]}...'")
+    print(f"Searching for similar chunks for query: '{query_text[:30]}...'") # 기존 로그
     query_vector = get_text_embedding(query_text)
     if query_vector is None:
         print("DEBUG search_similar_chunks: Failed to get query vector.")
@@ -761,6 +788,7 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chu
     if not _container_client: st.error("Azure Blob 클라이언트가 준비되지 않아 학습 결과를 저장할 수 없습니다."); return False
 
     vectors_to_add, new_metadata_entries_for_current_file = [], []
+    embedding_failed_for_some_chunks = False # 플래그 추가
     for chunk_idx, chunk in enumerate(text_chunks):
         print(f"Processing chunk {chunk_idx+1}/{len(text_chunks)} for embedding from '{uploaded_file_obj.name}'...")
         embedding = get_text_embedding(chunk)
@@ -768,11 +796,19 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chu
             vectors_to_add.append(embedding)
             new_metadata_entries_for_current_file.append({"file_name": uploaded_file_obj.name, "content": chunk})
         else:
+            embedding_failed_for_some_chunks = True # 임베딩 실패 플래그 설정
             print(f"Warning: Failed to get embedding for a chunk in '{uploaded_file_obj.name}'. Skipping chunk.")
-            # 특정 청크 임베딩 실패 시, 전체를 중단할지 또는 해당 청크만 제외할지 결정. 현재는 제외.
-            # st.error(f"'{uploaded_file_obj.name}'의 일부 내용에 대한 임베딩 생성 실패. 학습이 부분적으로만 진행될 수 있습니다.") # 사용자에게 알림
 
-    if not vectors_to_add: st.warning(f"'{uploaded_file_obj.name}' 파일에서 유효한 임베딩을 생성하지 못했습니다. 학습되지 않았습니다."); return False # 아예 학습 실패로 처리
+    if embedding_failed_for_some_chunks and not vectors_to_add: # 모든 청크 임베딩 실패
+        st.error(f"'{uploaded_file_obj.name}' 파일의 모든 내용에 대한 임베딩 생성에 실패했습니다. 학습되지 않았습니다.")
+        return False
+    elif embedding_failed_for_some_chunks: # 일부 청크만 실패
+         st.warning(f"'{uploaded_file_obj.name}' 파일의 일부 내용에 대한 임베딩 생성에 실패했습니다. 성공한 부분만 학습됩니다.")
+
+
+    if not vectors_to_add: # 이전에 성공한 청크가 하나도 없다면 (위에서 이미 처리되었지만 안전장치)
+        st.warning(f"'{uploaded_file_obj.name}' 파일에서 유효한 임베딩을 생성하지 못했습니다. 학습되지 않았습니다.");
+        return False
 
     try:
         current_embedding_dimension = np.array(vectors_to_add[0]).shape[0]
@@ -916,7 +952,7 @@ with chat_interface_tab:
                 assistant_response_content = "답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
                 try:
                     print("Step 1: Preparing context and calculating tokens...")
-                    context_items_for_prompt = [] # 변경됨
+                    context_items_for_prompt = []
                     temp_file_text = ""
 
                     prompt_structure = f"{PROMPT_RULES_CONTENT}\n\n위의 규칙을 반드시 준수하여 답변해야 합니다. 다음은 사용자의 질문에 답변하는 데 참고할 수 있는 문서의 내용입니다:\n<문서 시작>\n{{context}}\n<문서 끝>"
@@ -941,7 +977,7 @@ with chat_interface_tab:
                          context_string_for_llm = "참고할 컨텍스트를 포함할 수 없습니다 (토큰 제한)."
                     else:
                         print(f"DEBUG: Retrieving context from Vector DB based on query: '{user_query_input[:50]}...'")
-                        retrieved_items_from_db = search_similar_chunks(user_query_input, k_results=3) # 이제 딕셔너리 리스트 반환
+                        retrieved_items_from_db = search_similar_chunks(user_query_input, k_results=3)
                         if retrieved_items_from_db:
                             context_items_for_prompt.extend(retrieved_items_from_db)
                             print(f"DEBUG: Retrieved {len(retrieved_items_from_db)} items from Vector DB with source info.")
@@ -968,12 +1004,14 @@ with chat_interface_tab:
                             seen_contents_for_final_context = set()
                             formatted_context_chunks = []
                             for item in context_items_for_prompt:
-                                content_strip = item.get("content", "").strip()
-                                source_info = item.get('source', '출처 정보 없음')
-                                content_to_add = item.get('content', '')
-
+                                # item이 딕셔너리인지 확인하고, content 키를 안전하게 가져옵니다.
+                                content_value = item.get("content", "") if isinstance(item, dict) else str(item)
+                                content_strip = content_value.strip()
+                                
+                                source_info = item.get('source', '출처 정보 없음') if isinstance(item, dict) else '출처 정보 없음 (이전 형식)'
+                                
                                 if content_strip and content_strip not in seen_contents_for_final_context:
-                                    formatted_context_chunks.append(f"[출처: {source_info}]\n{content_to_add}")
+                                    formatted_context_chunks.append(f"[출처: {source_info}]\n{content_value}")
                                     seen_contents_for_final_context.add(content_strip)
 
                             if not formatted_context_chunks:
@@ -1049,7 +1087,14 @@ with chat_interface_tab:
                 except APIStatusError as ase:
                     assistant_response_content = f"API에서 오류 응답을 받았습니다 (상태 코드 {ase.status_code}): {ase.message}. 문제가 지속되면 관리자에게 문의해주세요."
                     st.error(assistant_response_content)
-                    print(f"API STATUS ERROR during chat completion (Status {ase.status_code}): {ase.message}")
+                    print(f"API STATUS ERROR during chat completion (Status {ase.status_code}): {ase.message}") # <<< Azure API 오류 메시지 확인
+                    if ase.response and ase.response.content: # <<< Azure API의 상세 오류 내용 로깅 추가
+                        try:
+                            error_details_chat = json.loads(ase.response.content.decode('utf-8'))
+                            print(f"DEBUG ChatCompletion: Azure API error details: {json.dumps(error_details_chat, indent=2, ensure_ascii=False)}")
+                        except Exception as json_e_chat:
+                            print(f"DEBUG ChatCompletion: Could not parse Azure API error content as JSON: {json_e_chat}")
+                            print(f"DEBUG ChatCompletion: Raw Azure API error content: {ase.response.content}")
                 except Exception as gen_err:
                     assistant_response_content = f"답변 생성 중 예기치 않은 오류가 발생했습니다: {gen_err}. 관리자에게 문의해주세요."
                     st.error(assistant_response_content)
@@ -1064,6 +1109,7 @@ if admin_settings_tab:
     with admin_settings_tab:
         st.header("⚙️ 관리자 설정")
         st.subheader("👥 가입 승인 대기자")
+        # (이전과 동일)
         if not USERS or not isinstance(USERS, dict):
             st.warning("사용자 정보를 로드할 수 없거나 형식이 올바르지 않습니다.")
             print(f"WARNING: USERS data is problematic or empty in admin tab. Type: {type(USERS)}")
@@ -1087,30 +1133,27 @@ if admin_settings_tab:
         st.markdown("---")
 
         st.subheader("📁 파일 업로드 및 학습 (Azure Blob Storage)")
-        # <<< 반복 업로드 방지 로직 수정 시작 >>>
+        # <<< 반복 업로드 방지 로직 (이전 답변 내용 적용) >>>
         if 'processed_admin_file_info' not in st.session_state:
-            st.session_state.processed_admin_file_info = None # 이제 파일 정보 튜플을 저장합니다.
+            st.session_state.processed_admin_file_info = None
 
-        def clear_processed_file_id_on_change_admin(): # 콜백 함수 이름 변경
+        def clear_processed_file_id_on_change_admin():
             print(f"DEBUG admin_file_uploader on_change: Clearing processed_admin_file_info (was: {st.session_state.processed_admin_file_info})")
             st.session_state.processed_admin_file_info = None
 
-        admin_file_uploader_key = "admin_file_uploader_v_with_state_fix_2" # 키를 변경하여 이전 상태와 분리
+        admin_file_uploader_key = "admin_file_uploader_v_with_state_fix_3" # 키 변경
         admin_uploaded_file = st.file_uploader(
             "학습할 파일 업로드",
             type=["pdf","docx","xlsx","xlsm","csv","pptx"],
             key=admin_file_uploader_key,
-            on_change=clear_processed_file_id_on_change_admin # 콜백 함수 이름 변경
+            on_change=clear_processed_file_id_on_change_admin
         )
 
         if admin_uploaded_file and container_client:
-            # 파일 정보로 고유 식별자 생성 (튜플 사용)
             current_file_info = (admin_uploaded_file.name, admin_uploaded_file.size, admin_uploaded_file.type)
-
             if st.session_state.processed_admin_file_info != current_file_info:
                 print(f"DEBUG Admin Upload: New file detected or re-upload. File Info: {current_file_info}, Processed Info: {st.session_state.processed_admin_file_info}")
                 with st.spinner(f"'{admin_uploaded_file.name}' 파일 처리 및 학습 중..."):
-                    # 파일 처리 및 학습 로직
                     extracted_content = extract_text_from_file(admin_uploaded_file)
                     if extracted_content:
                         content_chunks = chunk_text_into_pieces(extracted_content)
@@ -1121,22 +1164,21 @@ if admin_settings_tab:
 
                             if add_document_to_vector_db_and_blob(admin_uploaded_file, extracted_content, content_chunks, container_client):
                                 st.success(f"'{admin_uploaded_file.name}' 파일 학습 및 Azure Blob Storage에 업데이트 완료!")
-                                st.session_state.processed_admin_file_info = current_file_info # 처리된 파일 정보 저장
+                                st.session_state.processed_admin_file_info = current_file_info
                                 st.rerun()
                             else:
                                 st.error(f"'{admin_uploaded_file.name}' 학습 또는 Blob 업데이트 중 오류가 발생했습니다.")
-                                st.session_state.processed_admin_file_info = None # 오류 발생 시 재처리 허용
+                                st.session_state.processed_admin_file_info = None
                         else: st.warning(f"'{admin_uploaded_file.name}' 파일에서 유의미한 청크를 생성하지 못했습니다.")
                     else: st.warning(f"'{admin_uploaded_file.name}' 파일이 비어있거나 지원하지 않는 내용입니다.")
             elif st.session_state.processed_admin_file_info == current_file_info:
                  st.caption(f"'{admin_uploaded_file.name}' 파일은 이전에 성공적으로 학습되었습니다. 다른 파일을 업로드하거나, 현재 파일을 제거(X 버튼) 후 다시 업로드하여 재학습할 수 있습니다.")
         elif admin_uploaded_file and not container_client:
             st.error("Azure Blob 클라이언트가 준비되지 않아 파일을 업로드하고 학습할 수 없습니다.")
-        # <<< 반복 업로드 방지 로직 끝 >>>
         st.markdown("---")
 
         st.subheader("📊 API 사용량 모니터링 (Blob 로그 기반)")
-        # ... (이하 API 사용량 모니터링 및 Blob 파일 목록 코드는 이전과 동일하게 유지) ...
+        # (이전과 동일)
         if container_client:
             usage_data_from_blob = load_data_from_blob(USAGE_LOG_BLOB_NAME, container_client, "API 사용량 로그", default_value=[])
             if usage_data_from_blob and isinstance(usage_data_from_blob, list) and len(usage_data_from_blob) > 0 :
@@ -1172,6 +1214,7 @@ if admin_settings_tab:
         st.markdown("---")
 
         st.subheader("📂 Azure Blob Storage 파일 목록 (최근 100개)")
+        # (이전과 동일)
         if container_client:
             try:
                 blob_list_display = []
