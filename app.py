@@ -74,7 +74,7 @@ TARGET_INPUT_TOKENS_FOR_PROMPT = MODEL_MAX_INPUT_TOKENS - MODEL_MAX_OUTPUT_TOKEN
 # --- CSS 스타일 ---
 st.markdown("""
 <style>
-    /* (기존 CSS 스타일 내용 유지) */
+    /* (CSS 내용은 이전 답변과 동일) */
     .stApp > header ~ div [data-testid="stHorizontalBlock"] > div:nth-child(2) div[data-testid="stButton"] > button {
         background-color: #FFFFFF; color: #333F48; border: 1px solid #BCC0C4;
         border-radius: 8px; padding: 8px 12px; font-weight: 500;
@@ -119,10 +119,11 @@ st.markdown("""
 def get_azure_openai_client_cached():
     print("Attempting to initialize Azure OpenAI client...")
     try:
-        # Streamlit Cloud Secrets에서 API 버전 값을 가져옵니다.
-        # 사용자가 "2024-02-15-preview"로 설정하는 것을 권장합니다.
-        api_version_to_use = st.secrets.get("AZURE_OPENAI_VERSION", "2024-02-15-preview") # 기본값을 더 안정적인 버전으로
+        api_version_to_use = st.secrets.get("AZURE_OPENAI_VERSION", "2024-02-15-preview") # 안정적인 기본값
         print(f"DEBUG: Initializing AzureOpenAI client with API version: {api_version_to_use}")
+        # 문제가 되었던 "2024-12-01-preview" 사용 시 경고 (선택적)
+        # if api_version_to_use == "2024-12-01-preview":
+        #     print("WARNING: Using a future-dated API version '2024-12-01-preview'. This might be unstable or invalid for some models.")
 
         client = AzureOpenAI(
             api_key=st.secrets["AZURE_OPENAI_KEY"],
@@ -133,11 +134,11 @@ def get_azure_openai_client_cached():
         print("Azure OpenAI client initialized successfully.")
         return client
     except KeyError as e:
-        st.error(f"Azure OpenAI 설정 오류: secrets.toml 또는 Streamlit Cloud Secrets에 '{e.args[0]}' 키가 없습니다.")
+        st.error(f"Azure OpenAI 설정 오류: secrets에 '{e.args[0]}' 키가 없습니다.") # 오류 메시지 명확화
         print(f"ERROR: Missing Azure OpenAI secret: {e.args[0]}")
         return None
     except Exception as e:
-        st.error(f"Azure OpenAI 클라이언트 초기화 중 심각한 오류 발생: {e}.")
+        st.error(f"Azure OpenAI 클라이언트 초기화 중 오류: {e}.") # 오류 메시지 명확화
         print(f"ERROR: Azure OpenAI client initialization failed: {e}\n{traceback.format_exc()}")
         return None
 
@@ -153,11 +154,11 @@ def get_azure_blob_clients_cached():
         print(f"Azure Blob Service client and container client for '{container_name}' initialized successfully.")
         return blob_service_client, container_client
     except KeyError as e:
-        st.error(f"Azure Blob Storage 설정 오류: secrets.toml 또는 Streamlit Cloud Secrets에 '{e.args[0]}' 키가 없습니다.")
+        st.error(f"Azure Blob Storage 설정 오류: secrets에 '{e.args[0]}' 키가 없습니다.") # 오류 메시지 명확화
         print(f"ERROR: Missing Azure Blob Storage secret: {e.args[0]}")
         return None, None
     except Exception as e:
-        st.error(f"Azure Blob 클라이언트 초기화 중 심각한 오류 발생: {e}.")
+        st.error(f"Azure Blob 클라이언트 초기화 중 오류: {e}.") # 오류 메시지 명확화
         print(f"ERROR: Azure Blob client initialization failed: {e}\n{traceback.format_exc()}")
         return None, None
 
@@ -170,7 +171,7 @@ if openai_client:
         EMBEDDING_MODEL = st.secrets["AZURE_OPENAI_EMBEDDING_DEPLOYMENT"]
         print(f"Embedding model set to: {EMBEDDING_MODEL}")
     except KeyError:
-        st.error("secrets.toml 또는 Streamlit Cloud Secrets에 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT' 설정이 없습니다.")
+        st.error("secrets에 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT' 설정이 없습니다.") # 오류 메시지 명확화
         print("ERROR: Missing AZURE_OPENAI_EMBEDDING_DEPLOYMENT secret.")
         openai_client = None
     except Exception as e:
@@ -303,7 +304,7 @@ print(f"Attempting to load COOKIE_SECRET from st.secrets: {st.secrets.get('COOKI
 try:
     cookie_secret_key = st.secrets.get("COOKIE_SECRET")
     if not cookie_secret_key:
-        st.error("secrets.toml 또는 Streamlit Cloud Secrets에 'COOKIE_SECRET'이(가) 설정되지 않았거나 비어있습니다.")
+        st.error("secrets에 'COOKIE_SECRET'이(가) 설정되지 않았거나 비어있습니다.") # 오류 메시지 명확화
         print("ERROR: COOKIE_SECRET is not set or empty in st.secrets.")
     else:
         cookies = EncryptedCookieManager(
@@ -316,8 +317,9 @@ try:
                 print("CookieManager is ready on initial setup try.")
             else:
                 print("CookieManager not ready on initial setup try (may resolve on first interaction).")
-        except Exception as e_ready_init:
+        except Exception as e_ready_init: # .ready() 호출 시 예외 처리
             print(f"WARNING: cookies.ready() call during initial setup failed: {e_ready_init}")
+            cookie_manager_ready = False # 명시적으로 false 처리
 except Exception as e:
     st.error(f"쿠키 매니저 객체 생성 중 알 수 없는 오류 발생: {e}")
     print(f"CRITICAL: CookieManager object creation error: {e}\n{traceback.format_exc()}")
@@ -338,10 +340,17 @@ if "authenticated" not in st.session_state:
     st.session_state["user"] = {}
     st.session_state["messages"] = []
     if cookies:
+        # 쿠키에서 인증 정보 복원 시도 (cookies.ready() 재확인 및 예외처리 강화)
+        is_ready_for_cookie_load = False
         try:
             if cookies.ready():
-                cookie_manager_ready = True
+                is_ready_for_cookie_load = True
                 print("CookieManager became ready before attempting to load cookies from browser.")
+        except Exception as e_ready_check:
+            print(f"WARNING: cookies.ready() check before loading cookies failed: {e_ready_check}")
+
+        if is_ready_for_cookie_load:
+            try:
                 auth_cookie_val = cookies.get("authenticated")
                 print(f"Cookie 'authenticated' value on session init: {auth_cookie_val}")
                 if auth_cookie_val == "true":
@@ -375,11 +384,11 @@ if "authenticated" not in st.session_state:
                 else:
                     print("Authenticated cookie not set to 'true'.")
                     st.session_state["authenticated"] = False
-            else:
-                print("CookieManager not ready when attempting to load cookies from browser.")
+            except Exception as e_cookie_load:
+                print(f"ERROR during cookie processing (get/save): {e_cookie_load}\n{traceback.format_exc()}")
                 st.session_state["authenticated"] = False
-        except Exception as e_cookie_load:
-            print(f"ERROR during cookie processing (get/save): {e_cookie_load}\n{traceback.format_exc()}")
+        else:
+            print("CookieManager not ready when attempting to load cookies from browser (after initial check).")
             st.session_state["authenticated"] = False
     else:
          print("CookieManager object is None, cannot restore session.")
@@ -389,7 +398,7 @@ if "messages" not in st.session_state:
     st.session_state["messages"] = []
     print("Double check: Initializing messages as it was not in session_state before login UI.")
 
-if cookies and not cookie_manager_ready:
+if cookies and not cookie_manager_ready: # 로그인 UI 표시 전, 쿠키 매니저 준비 상태 재확인
     try:
         if cookies.ready():
             cookie_manager_ready = True
@@ -435,7 +444,7 @@ if not st.session_state.get("authenticated", False):
                     st.session_state["user"] = user_data_login
                     st.session_state["messages"] = []
                     print(f"Login successful for user '{uid}'. Chat messages cleared.")
-                    if cookies and cookies.ready():
+                    if cookies and cookies.ready(): # 로그인 성공 후 쿠키 저장 시점에도 ready 확인
                         try:
                             cookies["authenticated"] = "true"; cookies["user"] = json.dumps(user_data_login)
                             cookies["login_time"] = str(time.time()); cookies.save()
@@ -474,13 +483,13 @@ with top_cols_main[0]:
             st.markdown(f"""
             <div class="logo-container">
                 <img src="data:image/png;base64,{logo_b64}" class="logo-image" width="150">
-                <span class="version-text">ver 0.9.5 (Admin Upload Fix)</span>
+                <span class="version-text">ver 0.9.6 (Env/Upload Debug)</span>
             </div>""", unsafe_allow_html=True)
         else:
-            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.5 (Admin Upload Fix)</span></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.6 (Env/Upload Debug)</span></div>""", unsafe_allow_html=True)
     else:
         print(f"WARNING: Company logo file not found at {COMPANY_LOGO_PATH_REPO}")
-        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.5 (Admin Upload Fix)</span></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.6 (Env/Upload Debug)</span></div>""", unsafe_allow_html=True)
 
 with top_cols_main[1]:
     st.markdown('<div style="text-align: right;">', unsafe_allow_html=True)
@@ -489,7 +498,7 @@ with top_cols_main[1]:
         st.session_state["user"] = {}
         st.session_state["messages"] = []
         print("Logout successful. Chat messages cleared.")
-        if cookies and cookies.ready():
+        if cookies and cookies.ready(): # 로그아웃 시 쿠키 삭제 전에도 ready 확인
              try:
                  if "authenticated" in cookies: del cookies["authenticated"]
                  if "user" in cookies: del cookies["user"]
@@ -699,7 +708,7 @@ def get_text_embedding(text_to_embed):
     try:
         response = openai_client.embeddings.create(
             input=[text_to_embed],
-            model=EMBEDDING_MODEL, # 이 값은 st.secrets에서 AZURE_OPENAI_EMBEDDING_DEPLOYMENT로 설정됩니다.
+            model=EMBEDDING_MODEL,
             timeout=AZURE_OPENAI_TIMEOUT / 2
         )
         print("Embedding received.")
@@ -708,7 +717,6 @@ def get_text_embedding(text_to_embed):
         st.error(f"텍스트 임베딩 생성 중 API 오류 (상태 코드 {ase.status_code}): {ase.message}. 요청 내용을 확인해주세요.")
         print(f"API STATUS ERROR during embedding (get_text_embedding - Status {ase.status_code}): {ase.message}")
         print(f"DEBUG get_text_embedding: Failing text (first 100 chars): {text_to_embed[:100]}")
-        # Azure API가 반환하는 더 자세한 오류 내용을 포함할 수 있는지 확인
         if ase.response and ase.response.content:
             try:
                 error_details = json.loads(ase.response.content.decode('utf-8'))
@@ -716,7 +724,6 @@ def get_text_embedding(text_to_embed):
             except Exception as json_e:
                 print(f"DEBUG get_text_embedding: Could not parse Azure API error content as JSON: {json_e}")
                 print(f"DEBUG get_text_embedding: Raw Azure API error content: {ase.response.content}")
-
         return None
     except APITimeoutError:
         st.error("텍스트 임베딩 생성 중 시간 초과가 발생했습니다. 잠시 후 다시 시도해주세요.")
@@ -737,7 +744,6 @@ def get_text_embedding(text_to_embed):
 
 # --- <<< 수정된 search_similar_chunks 함수 (딕셔너리 리스트 반환) >>> ---
 def search_similar_chunks(query_text, k_results=3):
-    # (이전 답변에서 제공한 수정된 search_similar_chunks 함수 내용과 동일)
     print(f"DEBUG search_similar_chunks: Called with query '{query_text[:30]}...', k_results={k_results}")
     if index is None:
         print("DEBUG search_similar_chunks: FAISS index is None.")
@@ -749,7 +755,7 @@ def search_similar_chunks(query_text, k_results=3):
         print("DEBUG search_similar_chunks: Metadata is empty or None.")
         return []
 
-    print(f"Searching for similar chunks for query: '{query_text[:30]}...'") # 기존 로그
+    print(f"Searching for similar chunks for query: '{query_text[:30]}...'")
     query_vector = get_text_embedding(query_text)
     if query_vector is None:
         print("DEBUG search_similar_chunks: Failed to get query vector.")
@@ -788,7 +794,7 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chu
     if not _container_client: st.error("Azure Blob 클라이언트가 준비되지 않아 학습 결과를 저장할 수 없습니다."); return False
 
     vectors_to_add, new_metadata_entries_for_current_file = [], []
-    embedding_failed_for_some_chunks = False # 플래그 추가
+    embedding_failed_for_some_chunks = False
     for chunk_idx, chunk in enumerate(text_chunks):
         print(f"Processing chunk {chunk_idx+1}/{len(text_chunks)} for embedding from '{uploaded_file_obj.name}'...")
         embedding = get_text_embedding(chunk)
@@ -796,17 +802,16 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chu
             vectors_to_add.append(embedding)
             new_metadata_entries_for_current_file.append({"file_name": uploaded_file_obj.name, "content": chunk})
         else:
-            embedding_failed_for_some_chunks = True # 임베딩 실패 플래그 설정
+            embedding_failed_for_some_chunks = True
             print(f"Warning: Failed to get embedding for a chunk in '{uploaded_file_obj.name}'. Skipping chunk.")
 
-    if embedding_failed_for_some_chunks and not vectors_to_add: # 모든 청크 임베딩 실패
+    if embedding_failed_for_some_chunks and not vectors_to_add:
         st.error(f"'{uploaded_file_obj.name}' 파일의 모든 내용에 대한 임베딩 생성에 실패했습니다. 학습되지 않았습니다.")
         return False
-    elif embedding_failed_for_some_chunks: # 일부 청크만 실패
+    elif embedding_failed_for_some_chunks:
          st.warning(f"'{uploaded_file_obj.name}' 파일의 일부 내용에 대한 임베딩 생성에 실패했습니다. 성공한 부분만 학습됩니다.")
 
-
-    if not vectors_to_add: # 이전에 성공한 청크가 하나도 없다면 (위에서 이미 처리되었지만 안전장치)
+    if not vectors_to_add:
         st.warning(f"'{uploaded_file_obj.name}' 파일에서 유효한 임베딩을 생성하지 못했습니다. 학습되지 않았습니다.");
         return False
 
@@ -979,7 +984,7 @@ with chat_interface_tab:
                         print(f"DEBUG: Retrieving context from Vector DB based on query: '{user_query_input[:50]}...'")
                         retrieved_items_from_db = search_similar_chunks(user_query_input, k_results=3)
                         if retrieved_items_from_db:
-                            context_items_for_prompt.extend(retrieved_items_from_db)
+                            context_items_for_prompt.extend(retrieved_items_from_db) # 이제 딕셔너리 리스트를 extend
                             print(f"DEBUG: Retrieved {len(retrieved_items_from_db)} items from Vector DB with source info.")
                         else:
                             print(f"DEBUG: No relevant items found in Vector DB for query.")
@@ -988,7 +993,7 @@ with chat_interface_tab:
                             print(f"DEBUG: Processing additionally uploaded file in chat: {uploaded_chat_file_runtime.name}")
                             temp_file_text = extract_text_from_file(uploaded_chat_file_runtime)
                             if temp_file_text:
-                                context_items_for_prompt.append({
+                                context_items_for_prompt.append({ # 딕셔너리 형태로 추가
                                     "source": f"사용자 첨부 파일: {uploaded_chat_file_runtime.name}",
                                     "content": temp_file_text
                                 })
@@ -1004,12 +1009,15 @@ with chat_interface_tab:
                             seen_contents_for_final_context = set()
                             formatted_context_chunks = []
                             for item in context_items_for_prompt:
-                                # item이 딕셔너리인지 확인하고, content 키를 안전하게 가져옵니다.
-                                content_value = item.get("content", "") if isinstance(item, dict) else str(item)
+                                # item이 딕셔너리인지, 아니면 이전 버전의 문자열 청크인지 확인
+                                if isinstance(item, dict):
+                                    content_value = item.get("content", "")
+                                    source_info = item.get('source', '출처 정보 없음')
+                                else: # 이전 버전 호환 (문자열 청크)
+                                    content_value = str(item)
+                                    source_info = '학습된 내용 (출처 파일명 확인 필요)' # 또는 다른 기본값
+
                                 content_strip = content_value.strip()
-                                
-                                source_info = item.get('source', '출처 정보 없음') if isinstance(item, dict) else '출처 정보 없음 (이전 형식)'
-                                
                                 if content_strip and content_strip not in seen_contents_for_final_context:
                                     formatted_context_chunks.append(f"[출처: {source_info}]\n{content_value}")
                                     seen_contents_for_final_context.add(content_strip)
@@ -1087,8 +1095,8 @@ with chat_interface_tab:
                 except APIStatusError as ase:
                     assistant_response_content = f"API에서 오류 응답을 받았습니다 (상태 코드 {ase.status_code}): {ase.message}. 문제가 지속되면 관리자에게 문의해주세요."
                     st.error(assistant_response_content)
-                    print(f"API STATUS ERROR during chat completion (Status {ase.status_code}): {ase.message}") # <<< Azure API 오류 메시지 확인
-                    if ase.response and ase.response.content: # <<< Azure API의 상세 오류 내용 로깅 추가
+                    print(f"API STATUS ERROR during chat completion (Status {ase.status_code}): {ase.message}")
+                    if ase.response and ase.response.content:
                         try:
                             error_details_chat = json.loads(ase.response.content.decode('utf-8'))
                             print(f"DEBUG ChatCompletion: Azure API error details: {json.dumps(error_details_chat, indent=2, ensure_ascii=False)}")
@@ -1133,26 +1141,26 @@ if admin_settings_tab:
         st.markdown("---")
 
         st.subheader("📁 파일 업로드 및 학습 (Azure Blob Storage)")
-        # <<< 반복 업로드 방지 로직 (이전 답변 내용 적용) >>>
+        # <<< 반복 업로드 방지 로직 적용 >>>
         if 'processed_admin_file_info' not in st.session_state:
             st.session_state.processed_admin_file_info = None
 
-        def clear_processed_file_id_on_change_admin():
+        def clear_processed_file_info_on_admin_upload_change():
             print(f"DEBUG admin_file_uploader on_change: Clearing processed_admin_file_info (was: {st.session_state.processed_admin_file_info})")
             st.session_state.processed_admin_file_info = None
 
-        admin_file_uploader_key = "admin_file_uploader_v_with_state_fix_3" # 키 변경
+        admin_file_uploader_key = "admin_file_uploader_v_final_fix_2" # 키 변경
         admin_uploaded_file = st.file_uploader(
             "학습할 파일 업로드",
             type=["pdf","docx","xlsx","xlsm","csv","pptx"],
             key=admin_file_uploader_key,
-            on_change=clear_processed_file_id_on_change_admin
+            on_change=clear_processed_file_info_on_admin_upload_change
         )
 
         if admin_uploaded_file and container_client:
             current_file_info = (admin_uploaded_file.name, admin_uploaded_file.size, admin_uploaded_file.type)
             if st.session_state.processed_admin_file_info != current_file_info:
-                print(f"DEBUG Admin Upload: New file detected or re-upload. File Info: {current_file_info}, Processed Info: {st.session_state.processed_admin_file_info}")
+                print(f"DEBUG Admin Upload: New or different file detected. File Info: {current_file_info}, Previously Processed Info: {st.session_state.processed_admin_file_info}")
                 with st.spinner(f"'{admin_uploaded_file.name}' 파일 처리 및 학습 중..."):
                     extracted_content = extract_text_from_file(admin_uploaded_file)
                     if extracted_content:
