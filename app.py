@@ -28,10 +28,10 @@ import traceback
 import base64
 import tiktoken
 
-# streamlit_cookies_manager 임포트를 사용하는 곳 근처로 이동시킵니다.
-# from streamlit_cookies_manager import EncryptedCookieManager, CookiesNotReady # 여기서 일단 주석 처리
-
-print("Streamlit core and other libraries imported.") # 변경된 부분 확인용 로그
+# streamlit_cookies_manager는 사용하는 곳 근처 또는 여기서 임포트
+# CookiesNotReady를 직접 임포트하지 않도록 수정
+from streamlit_cookies_manager import EncryptedCookieManager
+print("Imported streamlit_cookies_manager (EncryptedCookieManager only).")
 
 try:
     tokenizer = tiktoken.get_encoding("o200k_base")
@@ -251,49 +251,33 @@ else:
     print("CRITICAL: Cannot initialize USERS due to Blob client failure.")
     USERS = {"admin": {"name": "관리자(연결실패)", "department": "시스템", "password_hash": generate_password_hash("fallback"), "approved": True, "role": "admin"}}
 
-
-# --- 쿠키 매니저 및 세션 상태 초기화 (임포트 위치 변경 시도) ---
 cookies = None
 cookie_manager_ready = False
-
-# streamlit_cookies_manager 라이브러리 임포트 및 객체 생성
+print(f"Attempting to load COOKIE_SECRET from st.secrets: {st.secrets.get('COOKIE_SECRET')}")
 try:
-    from streamlit_cookies_manager import EncryptedCookieManager, CookiesNotReady # 여기에 임포트
-    print("Imported streamlit_cookies_manager successfully (later import).")
-    
     cookie_secret_key = st.secrets.get("COOKIE_SECRET")
     if not cookie_secret_key:
         st.error("'COOKIE_SECRET' is not set or empty in st.secrets.")
         print("ERROR: COOKIE_SECRET is not set or empty in st.secrets.")
-        # cookies remains None, cookie_manager_ready remains False
     else:
         cookies = EncryptedCookieManager(
-            prefix="gmp_chatbot_auth_v5_4_import_fix/", # Incremented prefix
+            prefix="gmp_chatbot_auth_v5_4_import_fix/", # Prefix updated
             password=cookie_secret_key
         )
         try:
             if cookies.ready():
                 cookie_manager_ready = True
-                print("CookieManager is ready on initial setup try (later import).")
+                print("CookieManager is ready on initial setup try.")
             else:
-                print("CookieManager not ready on initial setup try (later import).")
-        except CookiesNotReady: # 명시적으로 CookiesNotReady 예외 처리
-            print("INFO: CookiesNotReady caught during initial cookies.ready() check (later import). Manager will remain not ready.")
+                print("CookieManager not ready on initial setup try (may resolve on first interaction).")
+        except Exception as e_ready_init: # Catches CookiesNotReady or other errors
+            print(f"WARNING: cookies.ready() call during initial setup failed: {e_ready_init}")
             cookie_manager_ready = False
-        except Exception as e_ready_init:
-            print(f"WARNING: cookies.ready() call during initial setup failed (later import): {e_ready_init}")
-            cookie_manager_ready = False
-except ImportError as ie:
-    st.error(f"Failed to import streamlit_cookies_manager: {ie}. Cookie features will be disabled.")
-    print(f"CRITICAL IMPORT_ERROR: streamlit_cookies_manager: {ie}\n{traceback.format_exc()}")
+except Exception as e: # Errors during EncryptedCookieManager instantiation
+    st.error(f"Unknown error creating cookie manager object: {e}")
+    print(f"CRITICAL: CookieManager object creation error: {e}\n{traceback.format_exc()}")
     cookies = None
     cookie_manager_ready = False
-except Exception as e_cookie_obj_create: # 쿠키 객체 생성 중 다른 예외
-    st.error(f"Unknown error creating cookie manager object (later import): {e_cookie_obj_create}")
-    print(f"CRITICAL: CookieManager object creation error (later import): {e_cookie_obj_create}\n{traceback.format_exc()}")
-    cookies = None
-    cookie_manager_ready = False
-
 
 SESSION_TIMEOUT = 1800
 try:
@@ -313,7 +297,7 @@ if "authenticated" not in st.session_state:
 
     if cookies is not None and cookie_manager_ready:
         try:
-            if cookies.ready(): # 이 시점에서는 True를 반환할 것으로 기대
+            if cookies.ready():
                 print("CookieManager is ready. Attempting to load cookies for session restore.")
                 auth_cookie_val = cookies.get("authenticated")
                 print(f"Cookie 'authenticated' value on session init: {auth_cookie_val}")
@@ -337,33 +321,30 @@ if "authenticated" not in st.session_state:
                             else:
                                 print("User data in cookie is empty or invalid. Clearing auth state.")
                                 st.session_state["authenticated"] = False
-                                if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_invalid_user_v4")
+                                if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_invalid_user_data_opt_v4_importfix")
                         except json.JSONDecodeError:
                             print("ERROR: Failed to decode user JSON from cookie. Clearing auth state.")
                             st.session_state["authenticated"] = False
-                            if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_json_err_v4")
+                            if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_json_decode_error_opt_v4_importfix")
                     else:
                         print("Session timeout detected from cookie. Clearing auth state.")
                         st.session_state["authenticated"] = False
                         st.session_state["messages"] = []
-                        if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_timeout_v4")
+                        if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_session_timeout_opt_v4_importfix")
                 else:
                     print("Authenticated cookie not 'true'.")
                     st.session_state["authenticated"] = False
             else:
                 print("CookieManager.ready() returned False during session init. Cannot load cookies.")
                 st.session_state["authenticated"] = False
-        except CookiesNotReady:
-            print("CookiesNotReady exception during session init cookie operations. Session not restored.")
-            st.session_state["authenticated"] = False
-        except Exception as e_cookie_load:
-            print(f"General exception during cookie loading in session init: {e_cookie_load}\n{traceback.format_exc()}")
+        except Exception as e_cookie_load: # Catch CookiesNotReady implicitly if it's raised by .get()
+            print(f"Exception (possibly CookiesNotReady) during cookie operations in session init: {e_cookie_load}\n{traceback.format_exc()}")
             st.session_state["authenticated"] = False
     else:
         if cookies is None:
             print("Cookies object is None (COOKIE_SECRET missing or import failed). Cannot restore session.")
-        else: # cookies is not None, but cookie_manager_ready is False
-            print("CookieManager not ready (initial check failed or import issue). Cannot restore session.")
+        else: 
+            print("CookieManager not ready (initial check failed). Cannot restore session from cookies.")
         st.session_state["authenticated"] = False
 
 if "messages" not in st.session_state:
@@ -393,15 +374,14 @@ if not st.session_state.get("authenticated", False):
     if cookies is None or not cookie_manager_ready:
         st.warning("쿠키 시스템 초기화 중이거나 아직 준비되지 않았습니다. 잠시 후 새로고침하거나 다시 시도해주세요. 로그인이 유지되지 않을 수 있습니다.")
 
-    with st.form("auth_form_final_v5_import_fix", clear_on_submit=False): # Key updated
-        mode = st.radio("선택", ["로그인", "회원가입"], key="auth_mode_final_v5_import_fix")
-        # ... 이하 로그인 폼 및 로직은 이전과 동일하게 유지 ...
-        uid = st.text_input("ID", key="auth_uid_final_v5_import_fix")
-        pwd = st.text_input("비밀번호", type="password", key="auth_pwd_final_v5_import_fix")
+    with st.form("auth_form_final_v5_import_fix2", clear_on_submit=False): # Key updated
+        mode = st.radio("선택", ["로그인", "회원가입"], key="auth_mode_final_v5_import_fix2")
+        uid = st.text_input("ID", key="auth_uid_final_v5_import_fix2")
+        pwd = st.text_input("비밀번호", type="password", key="auth_pwd_final_v5_import_fix2")
         name, dept = "", ""
         if mode == "회원가입":
-            name = st.text_input("이름", key="auth_name_final_v5_import_fix")
-            dept = st.text_input("부서", key="auth_dept_final_v5_import_fix")
+            name = st.text_input("이름", key="auth_name_final_v5_import_fix2")
+            dept = st.text_input("부서", key="auth_dept_final_v5_import_fix2")
         submit_button = st.form_submit_button("확인")
 
     if submit_button:
@@ -417,12 +397,12 @@ if not st.session_state.get("authenticated", False):
                     st.session_state["user"] = user_data_login
                     st.session_state["messages"] = []
                     print(f"Login successful for user '{uid}'. Chat messages cleared.")
-                    
+
                     if cookies is not None:
                         try:
                             if cookies.ready():
                                 cookies["authenticated"] = "true"; cookies["user"] = json.dumps(user_data_login)
-                                cookies["login_time"] = str(time.time()); cookies.save(key="cookie_save_on_login_opt_v4")
+                                cookies["login_time"] = str(time.time()); cookies.save(key="cookie_save_on_login_opt_v4_importfix")
                                 print(f"Cookies saved for user '{uid}'.")
                             else:
                                 st.warning("Cookie system not ready at login, cannot save login state to browser.")
@@ -433,7 +413,7 @@ if not st.session_state.get("authenticated", False):
                     else:
                         st.warning("Cookie system not initialized, cannot save login state.")
                         print("WARNING: CookieManager object is None during login, cannot save cookies.")
-                        
+
                     st.success(f"{user_data_login.get('name', uid)}님, 환영합니다!"); st.rerun()
                 else: st.error("Incorrect password.")
             elif mode == "회원가입":
@@ -449,9 +429,6 @@ if not st.session_state.get("authenticated", False):
                         st.success("Sign-up request complete! Login possible after admin approval.")
     st.stop()
 
-# --- 이하 코드는 이전 버전과 대부분 동일합니다. (헤더, 탭 UI, 벡터DB 로드, 규칙 로드, 파일 처리 함수 등) ---
-# --- 변경된 쿠키 로직을 제외하고는 큰 변화가 없습니다. ---
-
 current_user_info = st.session_state.get("user", {})
 
 top_cols_main = st.columns([0.7, 0.3])
@@ -462,18 +439,18 @@ with top_cols_main[0]:
             st.markdown(f"""
             <div class="logo-container">
                 <img src="data:image/png;base64,{logo_b64}" class="logo-image" width="150">
-                <span class="version-text">ver 1.0.0 (Import Fix Attempt)</span>
+                <span class="version-text">ver 1.0.1 (Import Fix Attempt 3)</span>
             </div>""", unsafe_allow_html=True)
         else:
-            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 1.0.0 (Import Fix Attempt)</span></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 1.0.1 (Import Fix Attempt 3)</span></div>""", unsafe_allow_html=True)
     else:
         print(f"WARNING: Company logo file not found at {COMPANY_LOGO_PATH_REPO}")
-        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 1.0.0 (Import Fix Attempt)</span></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 1.0.1 (Import Fix Attempt 3)</span></div>""", unsafe_allow_html=True)
 
 
 with top_cols_main[1]:
     st.markdown('<div style="text-align: right;">', unsafe_allow_html=True)
-    if st.button("로그아웃", key="logout_button_final_v5_import_fix"): # Key updated
+    if st.button("로그아웃", key="logout_button_final_v5_import_fix2"): # Key updated
         st.session_state["authenticated"] = False
         st.session_state["user"] = {}
         st.session_state["messages"] = []
@@ -484,7 +461,7 @@ with top_cols_main[1]:
                     cookies["authenticated"] = "false"
                     cookies["user"] = ""
                     cookies["login_time"] = ""
-                    cookies.save(key="cookie_save_on_logout_opt_v4")
+                    cookies.save(key="cookie_save_on_logout_opt_v4_importfix")
                     print("Cookies cleared on logout.")
                 else:
                     print("WARNING: CookieManager not ready during logout, cannot clear cookies from browser storage.")
@@ -494,6 +471,10 @@ with top_cols_main[1]:
             print("WARNING: CookieManager object is None during logout, cannot clear cookies.")
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
+
+# 이하 코드는 이전과 동일 (메인 앱 제목, 벡터 DB 로드, 규칙 로드, 파일/이미지 처리, 채팅, 관리자 탭 등)
+# ... (이전 답변에서 제공한 나머지 코드 전체를 여기에 붙여넣으세요) ...
+# ... (main_tabs_list = st.tabs(...) 부터 코드 끝까지) ...
 
 st.markdown("""
 <div class="main-app-title-container">
@@ -686,7 +667,6 @@ def chunk_text_into_pieces(text_to_chunk, chunk_size=500):
         
     return [c for c in chunks_list if c]
 
-
 def get_image_description(image_bytes, image_filename, client_instance):
     # 함수 내용 생략 - 이전과 동일
     if not client_instance:
@@ -814,7 +794,6 @@ def get_batch_embeddings(texts_to_embed, client=openai_client, model=EMBEDDING_M
             
     return all_embeddings
 
-
 def search_similar_chunks(query_text, k_results=3):
     # 함수 내용 생략 - 이전과 동일
     if index is None or index.ntotal == 0 or not metadata:
@@ -844,7 +823,6 @@ def search_similar_chunks(query_text, k_results=3):
         st.error(f"Error during similarity search: {e}")
         print(f"ERROR: Similarity search failed: {e}\n{traceback.format_exc()}")
         return []
-
 
 def add_document_to_vector_db_and_blob(uploaded_file_obj, processed_content, text_chunks, _container_client, is_image_description=False):
     # 함수 내용 생략 - 이전과 동일
@@ -969,10 +947,18 @@ def log_openai_api_usage_to_blob(user_id_str, model_name_str, usage_stats_obj, _
     if not save_data_to_blob(current_usage_logs, USAGE_LOG_BLOB_NAME, _container_client, "API usage log"):
         print(f"WARNING: Failed to save API usage log to Blob for user '{user_id_str}'.")
 
+# --- 메인 UI 구성 ---
+tab_labels_list = ["💬 업무 질문"]
+if current_user_info.get("role") == "admin":
+    tab_labels_list.append("⚙️ 관리자 설정")
+
+main_tabs_list = st.tabs(tab_labels_list)
+chat_interface_tab = main_tabs_list[0]
+admin_settings_tab = main_tabs_list[1] if len(main_tabs_list) > 1 else None
 
 # --- 채팅 인터페이스 탭 ---
 with chat_interface_tab:
-    # 함수 내용 생략 - 이전과 동일 (파일 업로드/처리 로직은 수정된 함수들 호출)
+    # 함수 내용 생략 - 이전과 동일
     st.header("업무 질문")
     st.markdown("💡 예시: SOP 백업 주기, PIC/S Annex 11 차이, (파일 첨부 후) 이 사진 속 상황은 어떤 규정에 해당하나요? 등")
 
@@ -986,10 +972,10 @@ with chat_interface_tab:
         st.markdown(f"""<div class="chat-bubble-container {align_class}"><div class="bubble {bubble_class}">{content}</div><div class="timestamp">{time_str}</div></div>""", unsafe_allow_html=True)
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True) 
-    if st.button("📂 파일 첨부/숨기기", key="toggle_chat_uploader_final_v5_import_fix_btn"): 
+    if st.button("📂 파일 첨부/숨기기", key="toggle_chat_uploader_final_v5_import_fix_btn2"): 
         st.session_state.show_uploader = not st.session_state.get("show_uploader", False)
 
-    chat_file_uploader_key = "chat_file_uploader_final_v5_import_fix_widget" 
+    chat_file_uploader_key = "chat_file_uploader_final_v5_import_fix_widget2" 
     uploaded_chat_file_runtime = None 
     if st.session_state.get("show_uploader", False):
         uploaded_chat_file_runtime = st.file_uploader("질문과 함께 참고할 파일 첨부 (선택 사항)",
@@ -1000,11 +986,11 @@ with chat_interface_tab:
             if uploaded_chat_file_runtime.type.startswith("image/"):
                 st.image(uploaded_chat_file_runtime, width=200)
 
-    with st.form("chat_input_form_final_v5_import_fix", clear_on_submit=True): 
+    with st.form("chat_input_form_final_v5_import_fix2", clear_on_submit=True): 
         query_input_col, send_button_col = st.columns([4,1])
         with query_input_col:
             user_query_input = st.text_input("질문 입력:", placeholder="여기에 질문을 입력하세요...",
-                                             key="user_query_text_input_final_v5_import_fix", label_visibility="collapsed") 
+                                             key="user_query_text_input_final_v5_import_fix2", label_visibility="collapsed") 
         with send_button_col:
             send_query_button = st.form_submit_button("전송")
 
@@ -1178,12 +1164,12 @@ if admin_settings_tab:
                 for pending_uid, pending_user_data in pending_approval_users.items():
                     with st.expander(f"{pending_user_data.get('name','N/A')} ({pending_uid}) - {pending_user_data.get('department','N/A')}"):
                         approve_col, reject_col = st.columns(2)
-                        if approve_col.button("승인", key=f"admin_approve_user_final_v5_import_fix_{pending_uid}"): 
+                        if approve_col.button("승인", key=f"admin_approve_user_final_v5_import_fix2_{pending_uid}"): 
                             USERS[pending_uid]["approved"] = True
                             if save_data_to_blob(USERS, USERS_BLOB_NAME, container_client, "user info"):
                                 st.success(f"User '{pending_uid}' approved and saved to Blob."); st.rerun()
                             else: st.error("Failed to save user approval to Blob.")
-                        if reject_col.button("거절", key=f"admin_reject_user_final_v5_import_fix_{pending_uid}"): 
+                        if reject_col.button("거절", key=f"admin_reject_user_final_v5_import_fix2_{pending_uid}"): 
                             USERS.pop(pending_uid, None)
                             if save_data_to_blob(USERS, USERS_BLOB_NAME, container_client, "user info"):
                                 st.info(f"User '{pending_uid}' rejected and saved to Blob."); st.rerun()
@@ -1198,7 +1184,7 @@ if admin_settings_tab:
         def clear_processed_file_info_on_admin_upload_change():
             st.session_state.processed_admin_file_info = None
 
-        admin_file_uploader_key = "admin_file_uploader_v_final_import_fix" 
+        admin_file_uploader_key = "admin_file_uploader_v_final_import_fix2" 
         admin_uploaded_file = st.file_uploader(
             "학습할 파일 업로드 (PDF, DOCX, XLSX, CSV, PPTX, TXT, PNG, JPG, JPEG)",
             type=["pdf","docx","xlsx","xlsm","csv","pptx", "txt", "png", "jpg", "jpeg"], 
