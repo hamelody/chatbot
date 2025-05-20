@@ -28,10 +28,10 @@ import traceback
 import base64
 import tiktoken
 
-# streamlit_cookies_manager는 사용하는 곳 근처 또는 여기서 임포트
-# CookiesNotReady를 직접 임포트하지 않도록 수정
 from streamlit_cookies_manager import EncryptedCookieManager
+# CookiesNotReady는 try-except Exception으로 처리하므로 직접 임포트 X
 print("Imported streamlit_cookies_manager (EncryptedCookieManager only).")
+
 
 try:
     tokenizer = tiktoken.get_encoding("o200k_base")
@@ -68,15 +68,52 @@ TARGET_INPUT_TOKENS_FOR_PROMPT = MODEL_MAX_INPUT_TOKENS - MODEL_MAX_OUTPUT_TOKEN
 IMAGE_DESCRIPTION_MAX_TOKENS = 500
 EMBEDDING_BATCH_SIZE = 16
 
+# --- CSS 스타일 ---
 st.markdown("""
 <style>
     /* CSS 내용 생략 - 이전과 동일 */
+    .stApp > header ~ div [data-testid="stHorizontalBlock"] > div:nth-child(2) div[data-testid="stButton"] > button {
+        background-color: #FFFFFF; color: #333F48; border: 1px solid #BCC0C4;
+        border-radius: 8px; padding: 8px 12px; font-weight: 500;
+        width: auto; min-width: 100px; white-space: nowrap; display: inline-block;
+        transition: background-color 0.3s ease, border-color 0.3s ease;
+    }
+    .stApp > header ~ div [data-testid="stHorizontalBlock"] > div:nth-child(2) div[data-testid="stButton"] > button:hover {
+        background-color: #F0F2F5; border-color: #A0A4A8;
+    }
+    .stApp > header ~ div [data-testid="stHorizontalBlock"] > div:nth-child(2) div[data-testid="stButton"] > button:active {
+        background-color: #E0E2E5;
+    }
+    .chat-bubble-container { display: flex; flex-direction: column; margin-bottom: 15px; }
+    .user-align { align-items: flex-end; }
+    .assistant-align { align-items: flex-start; }
+    .bubble { padding: 10px 15px; border-radius: 18px; max-width: 75%; word-wrap: break-word; display: inline-block; color: black; box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.08); position: relative; }
+    .user-bubble { background-color: #90EE90; color: black; border-bottom-right-radius: 5px; }
+    .assistant-bubble { background-color: #E9E9EB; border-bottom-left-radius: 5px; }
+    .timestamp { font-size: 0.7rem; color: #8E8E93; padding: 2px 5px 0px 5px; }
+    .main-app-title-container { text-align: center; margin-bottom: 24px; }
+    .main-app-title { font-size: 2.1rem; font-weight: bold; display: block; }
+    .main-app-subtitle { font-size: 0.9rem; color: gray; display: block; margin-top: 4px;}
+    .logo-container { display: flex; align-items: center; }
+    .logo-image { margin-right: 10px; }
+    .version-text { font-size: 0.9rem; color: gray; }
+    .login-page-header-container { text-align: center; margin-top: 20px; margin-bottom: 10px;}
+    .login-page-main-title { font-size: 1.8rem; font-weight: bold; display: block; color: #333F48; } 
+    .login-page-sub-title { font-size: 0.85rem; color: gray; display: block; margin-top: 2px; margin-bottom: 20px;}
+    .login-form-title { font-size: 1.6rem; font-weight: bold; text-align: center; margin-top: 10px; margin-bottom: 25px; }
+    @media (max-width: 768px) {
+        .main-app-title { font-size: 1.8rem; }
+        .main-app-subtitle { font-size: 0.8rem; }
+        .login-page-main-title { font-size: 1.5rem; }
+        .login-page-sub-title { font-size: 0.8rem; }
+        .login-form-title { font-size: 1.3rem; margin-bottom: 20px; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
 @st.cache_resource
 def get_azure_openai_client_cached():
-    # 함수 내용 생략 - 이전과 동일
+    # 함수 내용 생략
     print("Attempting to initialize Azure OpenAI client...")
     try:
         api_version_to_use = st.secrets.get("AZURE_OPENAI_VERSION", "2024-02-15-preview")
@@ -100,7 +137,7 @@ def get_azure_openai_client_cached():
 
 @st.cache_resource
 def get_azure_blob_clients_cached():
-    # 함수 내용 생략 - 이전과 동일
+    # 함수 내용 생략
     print("Attempting to initialize Azure Blob Service client...")
     try:
         conn_str = st.secrets["AZURE_BLOB_CONN"]
@@ -136,7 +173,7 @@ if openai_client:
         openai_client = None
 
 def load_data_from_blob(blob_name, _container_client, data_description="data", default_value=None):
-    # 함수 내용 생략 - 이전과 동일
+    # 함수 내용 생략
     if not _container_client:
         print(f"ERROR: Blob Container client is None for load_data_from_blob ('{data_description}'). Returning default.")
         return default_value if default_value is not None else {}
@@ -146,14 +183,12 @@ def load_data_from_blob(blob_name, _container_client, data_description="data", d
         if blob_client_instance.exists():
             with tempfile.TemporaryDirectory() as tmpdir:
                 local_temp_path = os.path.join(tmpdir, os.path.basename(blob_name))
-                print(f"Downloading '{blob_name}' to '{local_temp_path}'...")
                 with open(local_temp_path, "wb") as download_file:
                     download_stream = blob_client_instance.download_blob(timeout=60)
                     download_file.write(download_stream.readall())
                 if os.path.getsize(local_temp_path) > 0:
                     with open(local_temp_path, "r", encoding="utf-8") as f:
                         loaded_data = json.load(f)
-                    print(f"'{data_description}' loaded successfully from Blob: '{blob_name}'")
                     return loaded_data
                 else:
                     print(f"WARNING: '{data_description}' file '{blob_name}' exists in Blob but is empty. Returning default.")
@@ -175,12 +210,11 @@ def load_data_from_blob(blob_name, _container_client, data_description="data", d
         return default_value if default_value is not None else {}
 
 def save_data_to_blob(data_to_save, blob_name, _container_client, data_description="data"):
-    # 함수 내용 생략 - 이전과 동일
+    # 함수 내용 생략
     if not _container_client:
         st.error(f"Cannot save '{data_description}': Azure Blob client not ready.")
         print(f"ERROR: Blob Container client is None, cannot save '{blob_name}'.")
         return False
-    print(f"Attempting to save '{data_description}' to Blob Storage: '{blob_name}'")
     try:
         if not isinstance(data_to_save, (dict, list)):
             st.error(f"Save failed for '{data_description}': Data is not JSON serializable (dict or list).")
@@ -191,10 +225,8 @@ def save_data_to_blob(data_to_save, blob_name, _container_client, data_descripti
             with open(local_temp_path, "w", encoding="utf-8") as f:
                 json.dump(data_to_save, f, ensure_ascii=False, indent=2)
             blob_client_instance = _container_client.get_blob_client(blob_name)
-            print(f"Uploading '{local_temp_path}' to Blob '{blob_name}'...")
             with open(local_temp_path, "rb") as data_stream:
                 blob_client_instance.upload_blob(data_stream, overwrite=True, timeout=60)
-            print(f"Successfully saved '{data_description}' to Blob: '{blob_name}'")
         return True
     except AzureError as ae:
         st.error(f"Azure service error saving '{data_description}' to Blob: {ae}")
@@ -206,7 +238,7 @@ def save_data_to_blob(data_to_save, blob_name, _container_client, data_descripti
         return False
 
 def save_binary_data_to_blob(local_file_path, blob_name, _container_client, data_description="binary data"):
-    # 함수 내용 생략 - 이전과 동일
+    # 함수 내용 생략
     if not _container_client:
         st.error(f"Cannot save binary '{data_description}': Azure Blob client not ready.")
         print(f"ERROR: Blob Container client is None, cannot save binary '{blob_name}'.")
@@ -215,12 +247,10 @@ def save_binary_data_to_blob(local_file_path, blob_name, _container_client, data
         st.error(f"Local file for binary '{data_description}' not found: '{local_file_path}'")
         print(f"ERROR: Local file for binary data not found: '{local_file_path}'")
         return False
-    print(f"Attempting to save binary '{data_description}' from '{local_file_path}' to Blob: '{blob_name}'")
     try:
         blob_client_instance = _container_client.get_blob_client(blob_name)
         with open(local_file_path, "rb") as data_stream:
             blob_client_instance.upload_blob(data_stream, overwrite=True, timeout=120)
-        print(f"Successfully saved binary '{data_description}' to Blob: '{blob_name}'")
         return True
     except AzureError as ae:
         st.error(f"Azure service error saving binary '{data_description}' to Blob: {ae}")
@@ -253,7 +283,7 @@ else:
 
 cookies = None
 cookie_manager_ready = False
-print(f"Attempting to load COOKIE_SECRET from st.secrets: {st.secrets.get('COOKIE_SECRET')}")
+print(f"Attempting to load COOKIE_SECRET from st.secrets...")
 try:
     cookie_secret_key = st.secrets.get("COOKIE_SECRET")
     if not cookie_secret_key:
@@ -261,23 +291,14 @@ try:
         print("ERROR: COOKIE_SECRET is not set or empty in st.secrets.")
     else:
         cookies = EncryptedCookieManager(
-            prefix="gmp_chatbot_auth_v5_4_import_fix/", # Prefix updated
+            prefix="gmp_chatbot_auth_v5_5_final_cookie_fix/",
             password=cookie_secret_key
         )
-        try:
-            if cookies.ready():
-                cookie_manager_ready = True
-                print("CookieManager is ready on initial setup try.")
-            else:
-                print("CookieManager not ready on initial setup try (may resolve on first interaction).")
-        except Exception as e_ready_init: # Catches CookiesNotReady or other errors
-            print(f"WARNING: cookies.ready() call during initial setup failed: {e_ready_init}")
-            cookie_manager_ready = False
-except Exception as e: # Errors during EncryptedCookieManager instantiation
+        print("CookieManager object created. Readiness will be checked before use.")
+except Exception as e:
     st.error(f"Unknown error creating cookie manager object: {e}")
     print(f"CRITICAL: CookieManager object creation error: {e}\n{traceback.format_exc()}")
     cookies = None
-    cookie_manager_ready = False
 
 SESSION_TIMEOUT = 1800
 try:
@@ -295,10 +316,11 @@ if "authenticated" not in st.session_state:
     st.session_state["user"] = {}
     st.session_state["messages"] = []
 
-    if cookies is not None and cookie_manager_ready:
+    if cookies is not None:
         try:
             if cookies.ready():
-                print("CookieManager is ready. Attempting to load cookies for session restore.")
+                cookie_manager_ready = True
+                print("CookieManager.ready() returned True. Attempting to load cookies for session restore.")
                 auth_cookie_val = cookies.get("authenticated")
                 print(f"Cookie 'authenticated' value on session init: {auth_cookie_val}")
 
@@ -321,46 +343,46 @@ if "authenticated" not in st.session_state:
                             else:
                                 print("User data in cookie is empty or invalid. Clearing auth state.")
                                 st.session_state["authenticated"] = False
-                                if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_invalid_user_data_opt_v4_importfix")
+                                # cookies.save() without key argument
+                                if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save()
                         except json.JSONDecodeError:
                             print("ERROR: Failed to decode user JSON from cookie. Clearing auth state.")
                             st.session_state["authenticated"] = False
-                            if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_json_decode_error_opt_v4_importfix")
+                            if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save()
                     else:
                         print("Session timeout detected from cookie. Clearing auth state.")
                         st.session_state["authenticated"] = False
                         st.session_state["messages"] = []
-                        if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_session_timeout_opt_v4_importfix")
+                        if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save()
                 else:
                     print("Authenticated cookie not 'true'.")
                     st.session_state["authenticated"] = False
             else:
                 print("CookieManager.ready() returned False during session init. Cannot load cookies.")
-                st.session_state["authenticated"] = False
-        except Exception as e_cookie_load: # Catch CookiesNotReady implicitly if it's raised by .get()
-            print(f"Exception (possibly CookiesNotReady) during cookie operations in session init: {e_cookie_load}\n{traceback.format_exc()}")
+                cookie_manager_ready = False
+        except Exception as e_cookie_op:
+            print(f"Exception during cookie operations in session init: {e_cookie_op}\n{traceback.format_exc()}")
             st.session_state["authenticated"] = False
+            cookie_manager_ready = False
     else:
-        if cookies is None:
-            print("Cookies object is None (COOKIE_SECRET missing or import failed). Cannot restore session.")
-        else: 
-            print("CookieManager not ready (initial check failed). Cannot restore session from cookies.")
+        print("Cookies object is None (COOKIE_SECRET missing or import failed). Cannot restore session.")
         st.session_state["authenticated"] = False
+        cookie_manager_ready = False
 
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
     print("Double check: Initializing messages (after auth block).")
 
-if cookies is not None and not cookie_manager_ready:
-    print("Attempting to make CookieManager ready once more before login UI check (if object exists)...")
+if cookies is not None and not cookie_manager_ready: # This attempts to set cookie_manager_ready to True if possible
+    print("Checking CookieManager readiness again before login UI...")
     try:
         if cookies.ready():
-            cookie_manager_ready = True
-            print("CookieManager became ready just before login UI check (on this second attempt).")
+            cookie_manager_ready = True # Set it True if .ready() passes here
+            print("CookieManager became ready before login UI.")
         else:
-            print("CookieManager still not ready just before login UI check (on this second attempt).")
+            print("CookieManager still not ready before login UI.")
     except Exception as e_ready_login_ui:
-        print(f"WARNING: cookies.ready() call just before login UI check failed: {e_ready_login_ui}")
+        print(f"WARNING: cookies.ready() call just before login UI failed: {e_ready_login_ui}")
 
 if not st.session_state.get("authenticated", False):
     st.markdown("""
@@ -371,17 +393,17 @@ if not st.session_state.get("authenticated", False):
     """, unsafe_allow_html=True)
     st.markdown('<p class="login-form-title">🔐 로그인 또는 회원가입</p>', unsafe_allow_html=True)
 
-    if cookies is None or not cookie_manager_ready:
-        st.warning("쿠키 시스템 초기화 중이거나 아직 준비되지 않았습니다. 잠시 후 새로고침하거나 다시 시도해주세요. 로그인이 유지되지 않을 수 있습니다.")
+    if cookies is None or not cookie_manager_ready: # Use the flag
+        st.warning("쿠키 시스템이 아직 준비되지 않았습니다. 로그인이 유지되지 않을 수 있습니다. 잠시 후 새로고침 해보세요.")
 
-    with st.form("auth_form_final_v5_import_fix2", clear_on_submit=False): # Key updated
-        mode = st.radio("선택", ["로그인", "회원가입"], key="auth_mode_final_v5_import_fix2")
-        uid = st.text_input("ID", key="auth_uid_final_v5_import_fix2")
-        pwd = st.text_input("비밀번호", type="password", key="auth_pwd_final_v5_import_fix2")
+    with st.form("auth_form_final_v5_final_fix2", clear_on_submit=False): # Key updated
+        mode = st.radio("선택", ["로그인", "회원가입"], key="auth_mode_final_v5_final_fix2")
+        uid = st.text_input("ID", key="auth_uid_final_v5_final_fix2")
+        pwd = st.text_input("비밀번호", type="password", key="auth_pwd_final_v5_final_fix2")
         name, dept = "", ""
         if mode == "회원가입":
-            name = st.text_input("이름", key="auth_name_final_v5_import_fix2")
-            dept = st.text_input("부서", key="auth_dept_final_v5_import_fix2")
+            name = st.text_input("이름", key="auth_name_final_v5_final_fix2")
+            dept = st.text_input("부서", key="auth_dept_final_v5_final_fix2")
         submit_button = st.form_submit_button("확인")
 
     if submit_button:
@@ -402,17 +424,17 @@ if not st.session_state.get("authenticated", False):
                         try:
                             if cookies.ready():
                                 cookies["authenticated"] = "true"; cookies["user"] = json.dumps(user_data_login)
-                                cookies["login_time"] = str(time.time()); cookies.save(key="cookie_save_on_login_opt_v4_importfix")
+                                cookies["login_time"] = str(time.time()); cookies.save() # Removed key argument
                                 print(f"Cookies saved for user '{uid}'.")
                             else:
-                                st.warning("Cookie system not ready at login, cannot save login state to browser.")
-                                print("WARNING: CookieManager not ready during login (after .ready() check), cannot save cookies.")
+                                st.warning("Cookie system not ready at login. Cannot save login state.")
+                                print("WARNING: CookieManager not ready during login SAVE attempt.")
                         except Exception as e_cookie_save_login:
                             st.warning(f"Problem saving login cookie: {e_cookie_save_login}")
                             print(f"ERROR: Failed to save login cookies: {e_cookie_save_login}")
                     else:
-                        st.warning("Cookie system not initialized, cannot save login state.")
-                        print("WARNING: CookieManager object is None during login, cannot save cookies.")
+                        st.warning("Cookie system not initialized. Cannot save login state.")
+                        print("WARNING: CookieManager object is None during login SAVE attempt.")
 
                     st.success(f"{user_data_login.get('name', uid)}님, 환영합니다!"); st.rerun()
                 else: st.error("Incorrect password.")
@@ -439,18 +461,18 @@ with top_cols_main[0]:
             st.markdown(f"""
             <div class="logo-container">
                 <img src="data:image/png;base64,{logo_b64}" class="logo-image" width="150">
-                <span class="version-text">ver 1.0.1 (Import Fix Attempt 3)</span>
+                <span class="version-text">ver 1.0.3 (Cookie Save Fix)</span>
             </div>""", unsafe_allow_html=True)
         else:
-            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 1.0.1 (Import Fix Attempt 3)</span></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 1.0.3 (Cookie Save Fix)</span></div>""", unsafe_allow_html=True)
     else:
         print(f"WARNING: Company logo file not found at {COMPANY_LOGO_PATH_REPO}")
-        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 1.0.1 (Import Fix Attempt 3)</span></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 1.0.3 (Cookie Save Fix)</span></div>""", unsafe_allow_html=True)
 
 
 with top_cols_main[1]:
     st.markdown('<div style="text-align: right;">', unsafe_allow_html=True)
-    if st.button("로그아웃", key="logout_button_final_v5_import_fix2"): # Key updated
+    if st.button("로그아웃", key="logout_button_final_v5_final_fix2"): # Key updated
         st.session_state["authenticated"] = False
         st.session_state["user"] = {}
         st.session_state["messages"] = []
@@ -461,20 +483,16 @@ with top_cols_main[1]:
                     cookies["authenticated"] = "false"
                     cookies["user"] = ""
                     cookies["login_time"] = ""
-                    cookies.save(key="cookie_save_on_logout_opt_v4_importfix")
+                    cookies.save() # Removed key argument
                     print("Cookies cleared on logout.")
                 else:
-                    print("WARNING: CookieManager not ready during logout, cannot clear cookies from browser storage.")
+                    print("WARNING: CookieManager not ready during logout. Cannot clear cookies from browser.")
             except Exception as e_logout_cookie:
                  print(f"ERROR: Failed to clear cookies on logout: {e_logout_cookie}")
         else:
-            print("WARNING: CookieManager object is None during logout, cannot clear cookies.")
+            print("WARNING: CookieManager object is None during logout.")
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
-
-# 이하 코드는 이전과 동일 (메인 앱 제목, 벡터 DB 로드, 규칙 로드, 파일/이미지 처리, 채팅, 관리자 탭 등)
-# ... (이전 답변에서 제공한 나머지 코드 전체를 여기에 붙여넣으세요) ...
-# ... (main_tabs_list = st.tabs(...) 부터 코드 끝까지) ...
 
 st.markdown("""
 <div class="main-app-title-container">
@@ -483,6 +501,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# --- 이하 벡터 DB 로드, 규칙 로드, 파일/이미지 처리, 채팅 및 관리자 탭 UI 로직은 이전과 동일하게 유지 ---
+# (생략된 부분은 이전 답변의 전체 코드에서 가져오시면 됩니다)
 @st.cache_resource
 def load_vector_db_from_blob_cached(_container_client):
     # 함수 내용 생략 - 이전과 동일
@@ -527,7 +547,7 @@ def load_vector_db_from_blob_cached(_container_client):
 
             if idx is not None:
                 metadata_blob_client = _container_client.get_blob_client(METADATA_BLOB_NAME)
-                if metadata_blob_client.exists() and (idx.ntotal > 0 or (index_blob_client.exists() and os.path.getsize(local_index_path) > 0) ):
+                if metadata_blob_client.exists() and (idx.ntotal > 0 or (index_blob_client.exists() and os.path.exists(local_index_path) and os.path.getsize(local_index_path) > 0) ): # 수정: local_index_path 존재 및 크기 확인
                     print(f"Downloading '{METADATA_BLOB_NAME}'...")
                     with open(local_metadata_path, "wb") as download_file_meta:
                         download_stream_meta = metadata_blob_client.download_blob(timeout=60)
@@ -547,7 +567,7 @@ def load_vector_db_from_blob_cached(_container_client):
             if idx is not None and idx.ntotal == 0 and len(meta) > 0:
                 print(f"INFO: FAISS index is empty (ntotal=0) but metadata is not. Clearing metadata for consistency.")
                 meta = []
-            elif idx is not None and idx.ntotal > 0 and not meta and index_blob_client.exists() and os.path.getsize(local_index_path) > 0 :
+            elif idx is not None and idx.ntotal > 0 and not meta and index_blob_client.exists() and os.path.exists(local_index_path) and os.path.getsize(local_index_path) > 0 :
                 print(f"CRITICAL WARNING: FAISS index has data (ntotal={idx.ntotal}) but metadata is empty. This may lead to errors.")
 
     except AzureError as ae:
@@ -972,10 +992,10 @@ with chat_interface_tab:
         st.markdown(f"""<div class="chat-bubble-container {align_class}"><div class="bubble {bubble_class}">{content}</div><div class="timestamp">{time_str}</div></div>""", unsafe_allow_html=True)
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True) 
-    if st.button("📂 파일 첨부/숨기기", key="toggle_chat_uploader_final_v5_import_fix_btn2"): 
+    if st.button("📂 파일 첨부/숨기기", key="toggle_chat_uploader_final_v5_final_fix_btn"): 
         st.session_state.show_uploader = not st.session_state.get("show_uploader", False)
 
-    chat_file_uploader_key = "chat_file_uploader_final_v5_import_fix_widget2" 
+    chat_file_uploader_key = "chat_file_uploader_final_v5_final_fix_widget" 
     uploaded_chat_file_runtime = None 
     if st.session_state.get("show_uploader", False):
         uploaded_chat_file_runtime = st.file_uploader("질문과 함께 참고할 파일 첨부 (선택 사항)",
@@ -986,11 +1006,11 @@ with chat_interface_tab:
             if uploaded_chat_file_runtime.type.startswith("image/"):
                 st.image(uploaded_chat_file_runtime, width=200)
 
-    with st.form("chat_input_form_final_v5_import_fix2", clear_on_submit=True): 
+    with st.form("chat_input_form_final_v5_final_fix", clear_on_submit=True): 
         query_input_col, send_button_col = st.columns([4,1])
         with query_input_col:
             user_query_input = st.text_input("질문 입력:", placeholder="여기에 질문을 입력하세요...",
-                                             key="user_query_text_input_final_v5_import_fix2", label_visibility="collapsed") 
+                                             key="user_query_text_input_final_v5_final_fix", label_visibility="collapsed") 
         with send_button_col:
             send_query_button = st.form_submit_button("전송")
 
@@ -1164,12 +1184,12 @@ if admin_settings_tab:
                 for pending_uid, pending_user_data in pending_approval_users.items():
                     with st.expander(f"{pending_user_data.get('name','N/A')} ({pending_uid}) - {pending_user_data.get('department','N/A')}"):
                         approve_col, reject_col = st.columns(2)
-                        if approve_col.button("승인", key=f"admin_approve_user_final_v5_import_fix2_{pending_uid}"): 
+                        if approve_col.button("승인", key=f"admin_approve_user_final_v5_final_fix2_{pending_uid}"): 
                             USERS[pending_uid]["approved"] = True
                             if save_data_to_blob(USERS, USERS_BLOB_NAME, container_client, "user info"):
                                 st.success(f"User '{pending_uid}' approved and saved to Blob."); st.rerun()
                             else: st.error("Failed to save user approval to Blob.")
-                        if reject_col.button("거절", key=f"admin_reject_user_final_v5_import_fix2_{pending_uid}"): 
+                        if reject_col.button("거절", key=f"admin_reject_user_final_v5_final_fix2_{pending_uid}"): 
                             USERS.pop(pending_uid, None)
                             if save_data_to_blob(USERS, USERS_BLOB_NAME, container_client, "user info"):
                                 st.info(f"User '{pending_uid}' rejected and saved to Blob."); st.rerun()
@@ -1184,7 +1204,7 @@ if admin_settings_tab:
         def clear_processed_file_info_on_admin_upload_change():
             st.session_state.processed_admin_file_info = None
 
-        admin_file_uploader_key = "admin_file_uploader_v_final_import_fix2" 
+        admin_file_uploader_key = "admin_file_uploader_v_final_final_fix2" 
         admin_uploaded_file = st.file_uploader(
             "학습할 파일 업로드 (PDF, DOCX, XLSX, CSV, PPTX, TXT, PNG, JPG, JPEG)",
             type=["pdf","docx","xlsx","xlsm","csv","pptx", "txt", "png", "jpg", "jpeg"], 
