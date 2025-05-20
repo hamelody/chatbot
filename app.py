@@ -988,7 +988,7 @@ admin_settings_tab = main_tabs_list[1] if len(main_tabs_list) > 1 else None
 
 with chat_interface_tab:
     st.header("업무 질문")
-    st.markdown("💡 예시: SOP 백업 주기, PIC/S Annex 11 차이, (파일 첨부 후) 이 사진 속 상황은 어떤 규정에 해당하나요? 등")
+    st.markdown("💡 예시: (파일 첨부 후) 이 사진 속 상황은 어떤 규정에 해당하나요?, 번역 해주세요, ~ 관련 규정에 대해 설명해주세요 등")
 
     if "messages" not in st.session_state:
         st.session_state["messages"] = []
