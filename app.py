@@ -20,7 +20,7 @@ import tempfile
 from werkzeug.security import check_password_hash, generate_password_hash
 # from streamlit_cookies_manager import EncryptedCookieManager # 아래로 이동
 import traceback
-import base64
+import base64 # 이미지 처리를 위해 추가
 import tiktoken
 
 # Streamlit 앱의 가장 첫 번째 명령으로 st.set_page_config() 호출
@@ -66,9 +66,11 @@ UPLOAD_LOG_BLOB_NAME = "app_logs/upload_log.json"
 USAGE_LOG_BLOB_NAME = "app_logs/usage_log.json"
 AZURE_OPENAI_TIMEOUT = 60.0
 MODEL_MAX_INPUT_TOKENS = 128000
-MODEL_MAX_OUTPUT_TOKENS = 16384
+MODEL_MAX_OUTPUT_TOKENS = 16384 # GPT-4o-mini의 경우 16k가 아닐 수 있음, 모델 스펙 확인 필요 (예: 4k 또는 8k)
+                                # 여기서는 일단 요청하신대로 유지하나, 실제 모델의 최대 출력 토큰으로 조정 필요
 BUFFER_TOKENS = 500
 TARGET_INPUT_TOKENS_FOR_PROMPT = MODEL_MAX_INPUT_TOKENS - MODEL_MAX_OUTPUT_TOKENS - BUFFER_TOKENS
+IMAGE_DESCRIPTION_MAX_TOKENS = 500 # 이미지 설명 생성 시 최대 토큰
 
 
 # --- CSS 스타일 ---
@@ -119,12 +121,8 @@ st.markdown("""
 def get_azure_openai_client_cached():
     print("Attempting to initialize Azure OpenAI client...")
     try:
-        api_version_to_use = st.secrets.get("AZURE_OPENAI_VERSION", "2024-02-15-preview") # 안정적인 기본값
+        api_version_to_use = st.secrets.get("AZURE_OPENAI_VERSION", "2024-02-15-preview") 
         print(f"DEBUG: Initializing AzureOpenAI client with API version: {api_version_to_use}")
-        # 문제가 되었던 "2024-12-01-preview" 사용 시 경고 (선택적)
-        # if api_version_to_use == "2024-12-01-preview":
-        #     print("WARNING: Using a future-dated API version '2024-12-01-preview'. This might be unstable or invalid for some models.")
-
         client = AzureOpenAI(
             api_key=st.secrets["AZURE_OPENAI_KEY"],
             azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
@@ -134,17 +132,16 @@ def get_azure_openai_client_cached():
         print("Azure OpenAI client initialized successfully.")
         return client
     except KeyError as e:
-        st.error(f"Azure OpenAI 설정 오류: secrets에 '{e.args[0]}' 키가 없습니다.") # 오류 메시지 명확화
+        st.error(f"Azure OpenAI 설정 오류: secrets에 '{e.args[0]}' 키가 없습니다.") 
         print(f"ERROR: Missing Azure OpenAI secret: {e.args[0]}")
         return None
     except Exception as e:
-        st.error(f"Azure OpenAI 클라이언트 초기화 중 오류: {e}.") # 오류 메시지 명확화
+        st.error(f"Azure OpenAI 클라이언트 초기화 중 오류: {e}.") 
         print(f"ERROR: Azure OpenAI client initialization failed: {e}\n{traceback.format_exc()}")
         return None
 
 @st.cache_resource
 def get_azure_blob_clients_cached():
-    # (이전과 동일)
     print("Attempting to initialize Azure Blob Service client...")
     try:
         conn_str = st.secrets["AZURE_BLOB_CONN"]
@@ -154,11 +151,11 @@ def get_azure_blob_clients_cached():
         print(f"Azure Blob Service client and container client for '{container_name}' initialized successfully.")
         return blob_service_client, container_client
     except KeyError as e:
-        st.error(f"Azure Blob Storage 설정 오류: secrets에 '{e.args[0]}' 키가 없습니다.") # 오류 메시지 명확화
+        st.error(f"Azure Blob Storage 설정 오류: secrets에 '{e.args[0]}' 키가 없습니다.") 
         print(f"ERROR: Missing Azure Blob Storage secret: {e.args[0]}")
         return None, None
     except Exception as e:
-        st.error(f"Azure Blob 클라이언트 초기화 중 오류: {e}.") # 오류 메시지 명확화
+        st.error(f"Azure Blob 클라이언트 초기화 중 오류: {e}.") 
         print(f"ERROR: Azure Blob client initialization failed: {e}\n{traceback.format_exc()}")
         return None, None
 
@@ -171,13 +168,14 @@ if openai_client:
         EMBEDDING_MODEL = st.secrets["AZURE_OPENAI_EMBEDDING_DEPLOYMENT"]
         print(f"Embedding model set to: {EMBEDDING_MODEL}")
     except KeyError:
-        st.error("secrets에 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT' 설정이 없습니다.") # 오류 메시지 명확화
+        st.error("secrets에 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT' 설정이 없습니다.") 
         print("ERROR: Missing AZURE_OPENAI_EMBEDDING_DEPLOYMENT secret.")
-        openai_client = None
+        openai_client = None # 임베딩 모델 없이는 주요 기능 불가
     except Exception as e:
         st.error(f"임베딩 모델 설정 로드 중 오류: {e}")
         print(f"ERROR: Loading AZURE_OPENAI_EMBEDDING_DEPLOYMENT secret: {e}")
         openai_client = None
+
 
 # --- 데이터 로드/저장 유틸리티 함수 (Blob 연동) ---
 # (load_data_from_blob, save_data_to_blob, save_binary_data_to_blob 이전과 동일)
@@ -286,7 +284,7 @@ if container_client:
         print(f"'{USERS_BLOB_NAME}' from Blob is empty or admin is missing. Creating default admin.")
         USERS["admin"] = {
             "name": "관리자", "department": "품질보증팀",
-            "password_hash": generate_password_hash("diteam"),
+            "password_hash": generate_password_hash(st.secrets.get("ADMIN_PASSWORD", "diteam_fallback_secret")), # secrets에서 읽도록 수정
             "approved": True, "role": "admin"
         }
         if not save_data_to_blob(USERS, USERS_BLOB_NAME, container_client, "초기 사용자 정보"):
@@ -296,6 +294,7 @@ else:
     print("CRITICAL: Cannot initialize USERS due to Blob client failure.")
     USERS = {"admin": {"name": "관리자(연결실패)", "department": "시스템", "password_hash": generate_password_hash("fallback"), "approved": True, "role": "admin"}}
 
+
 # --- 쿠키 매니저 및 세션 상태 초기화 (안정성 강화 버전) ---
 # (이전과 동일)
 cookies = None
@@ -304,11 +303,11 @@ print(f"Attempting to load COOKIE_SECRET from st.secrets: {st.secrets.get('COOKI
 try:
     cookie_secret_key = st.secrets.get("COOKIE_SECRET")
     if not cookie_secret_key:
-        st.error("secrets에 'COOKIE_SECRET'이(가) 설정되지 않았거나 비어있습니다.") # 오류 메시지 명확화
+        st.error("secrets에 'COOKIE_SECRET'이(가) 설정되지 않았거나 비어있습니다.") 
         print("ERROR: COOKIE_SECRET is not set or empty in st.secrets.")
     else:
         cookies = EncryptedCookieManager(
-            prefix="gmp_chatbot_auth_v5_0/",
+            prefix="gmp_chatbot_auth_v5_1/", # 버전업데이트 (선택사항)
             password=cookie_secret_key
         )
         try:
@@ -317,9 +316,9 @@ try:
                 print("CookieManager is ready on initial setup try.")
             else:
                 print("CookieManager not ready on initial setup try (may resolve on first interaction).")
-        except Exception as e_ready_init: # .ready() 호출 시 예외 처리
+        except Exception as e_ready_init: 
             print(f"WARNING: cookies.ready() call during initial setup failed: {e_ready_init}")
-            cookie_manager_ready = False # 명시적으로 false 처리
+            cookie_manager_ready = False 
 except Exception as e:
     st.error(f"쿠키 매니저 객체 생성 중 알 수 없는 오류 발생: {e}")
     print(f"CRITICAL: CookieManager object creation error: {e}\n{traceback.format_exc()}")
@@ -340,7 +339,6 @@ if "authenticated" not in st.session_state:
     st.session_state["user"] = {}
     st.session_state["messages"] = []
     if cookies:
-        # 쿠키에서 인증 정보 복원 시도 (cookies.ready() 재확인 및 예외처리 강화)
         is_ready_for_cookie_load = False
         try:
             if cookies.ready():
@@ -371,16 +369,16 @@ if "authenticated" not in st.session_state:
                             else:
                                 print("User data in cookie is empty or invalid. Clearing auth state for cookie.")
                                 st.session_state["authenticated"] = False
-                                if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save()
+                                if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_invalid_user_data")
                         except json.JSONDecodeError:
                             print("ERROR: Failed to decode user JSON from cookie. Clearing auth state for cookie.")
                             st.session_state["authenticated"] = False
-                            if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save()
+                            if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_json_decode_error")
                     else:
                         print("Session timeout detected from cookie. Clearing auth state for cookie.")
                         st.session_state["authenticated"] = False
                         st.session_state["messages"] = []
-                        if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save()
+                        if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_session_timeout")
                 else:
                     print("Authenticated cookie not set to 'true'.")
                     st.session_state["authenticated"] = False
@@ -398,7 +396,7 @@ if "messages" not in st.session_state:
     st.session_state["messages"] = []
     print("Double check: Initializing messages as it was not in session_state before login UI.")
 
-if cookies and not cookie_manager_ready: # 로그인 UI 표시 전, 쿠키 매니저 준비 상태 재확인
+if cookies and not cookie_manager_ready: 
     try:
         if cookies.ready():
             cookie_manager_ready = True
@@ -421,14 +419,14 @@ if not st.session_state.get("authenticated", False):
     if not cookie_manager_ready and st.secrets.get("COOKIE_SECRET"):
         st.warning("쿠키 시스템을 초기화하고 있습니다. 잠시 후 새로고침하거나 다시 시도해주세요.")
 
-    with st.form("auth_form_final_v4_mobile_ui_fix", clear_on_submit=False):
-        mode = st.radio("선택", ["로그인", "회원가입"], key="auth_mode_final_v4_mobile_ui_fix")
-        uid = st.text_input("ID", key="auth_uid_final_v4_mobile_ui_fix")
-        pwd = st.text_input("비밀번호", type="password", key="auth_pwd_final_v4_mobile_ui_fix")
+    with st.form("auth_form_final_v5_img_txt", clear_on_submit=False): # 키 변경
+        mode = st.radio("선택", ["로그인", "회원가입"], key="auth_mode_final_v5_img_txt")
+        uid = st.text_input("ID", key="auth_uid_final_v5_img_txt")
+        pwd = st.text_input("비밀번호", type="password", key="auth_pwd_final_v5_img_txt")
         name, dept = "", ""
         if mode == "회원가입":
-            name = st.text_input("이름", key="auth_name_final_v4_mobile_ui_fix")
-            dept = st.text_input("부서", key="auth_dept_final_v4_mobile_ui_fix")
+            name = st.text_input("이름", key="auth_name_final_v5_img_txt")
+            dept = st.text_input("부서", key="auth_dept_final_v5_img_txt")
         submit_button = st.form_submit_button("확인")
 
     if submit_button:
@@ -442,12 +440,12 @@ if not st.session_state.get("authenticated", False):
                 elif check_password_hash(user_data_login["password_hash"], pwd):
                     st.session_state["authenticated"] = True
                     st.session_state["user"] = user_data_login
-                    st.session_state["messages"] = []
+                    st.session_state["messages"] = [] # 로그인 시 메시지 초기화
                     print(f"Login successful for user '{uid}'. Chat messages cleared.")
-                    if cookies and cookies.ready(): # 로그인 성공 후 쿠키 저장 시점에도 ready 확인
+                    if cookies and cookies.ready(): 
                         try:
                             cookies["authenticated"] = "true"; cookies["user"] = json.dumps(user_data_login)
-                            cookies["login_time"] = str(time.time()); cookies.save()
+                            cookies["login_time"] = str(time.time()); cookies.save(key="cookie_save_on_login")
                             print(f"Cookies saved for user '{uid}'.")
                         except Exception as e_cookie_save:
                             st.warning(f"로그인 쿠키 저장 중 문제 발생: {e_cookie_save}")
@@ -465,7 +463,7 @@ if not st.session_state.get("authenticated", False):
                                   "approved": False, "role": "user"}
                     if not save_data_to_blob(USERS, USERS_BLOB_NAME, container_client, "사용자 정보"):
                         st.error("사용자 정보 저장에 실패했습니다. 관리자에게 문의하세요.")
-                        USERS.pop(uid, None)
+                        USERS.pop(uid, None) # 저장 실패 시 롤백
                     else:
                         st.success("가입 신청 완료! 관리자 승인 후 로그인 가능합니다.")
     st.stop()
@@ -483,27 +481,29 @@ with top_cols_main[0]:
             st.markdown(f"""
             <div class="logo-container">
                 <img src="data:image/png;base64,{logo_b64}" class="logo-image" width="150">
-                <span class="version-text">ver 0.9.6 (Env/Upload Debug)</span>
+                <span class="version-text">ver 0.9.7 (Image/TXT Support)</span>
             </div>""", unsafe_allow_html=True)
-        else:
-            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.6 (Env/Upload Debug)</span></div>""", unsafe_allow_html=True)
-    else:
+        else: # 로고 파일은 있으나 base64 변환 실패 시
+            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.7 (Image/TXT Support)</span></div>""", unsafe_allow_html=True)
+    else: # 로고 파일 자체가 없을 시
         print(f"WARNING: Company logo file not found at {COMPANY_LOGO_PATH_REPO}")
-        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.6 (Env/Upload Debug)</span></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.7 (Image/TXT Support)</span></div>""", unsafe_allow_html=True)
+
 
 with top_cols_main[1]:
     st.markdown('<div style="text-align: right;">', unsafe_allow_html=True)
-    if st.button("로그아웃", key="logout_button_final_v4_mobile"):
+    if st.button("로그아웃", key="logout_button_final_v5_img_txt"): # 키 변경
         st.session_state["authenticated"] = False
         st.session_state["user"] = {}
-        st.session_state["messages"] = []
+        st.session_state["messages"] = [] # 로그아웃 시 메시지 초기화
         print("Logout successful. Chat messages cleared.")
-        if cookies and cookies.ready(): # 로그아웃 시 쿠키 삭제 전에도 ready 확인
+        if cookies and cookies.ready(): 
              try:
-                 if "authenticated" in cookies: del cookies["authenticated"]
-                 if "user" in cookies: del cookies["user"]
-                 if "login_time" in cookies: del cookies["login_time"]
-                 cookies.save()
+                 # 쿠키 삭제 시에는 del 보다 빈 값으로 덮어쓰는 것이 일부 환경에서 더 안정적일 수 있음
+                 cookies["authenticated"] = "false"
+                 cookies["user"] = ""
+                 cookies["login_time"] = ""
+                 cookies.save(key="cookie_save_on_logout")
                  print("Cookies cleared on logout.")
              except Exception as e_logout_cookie:
                  print(f"ERROR: Failed to clear cookies on logout: {e_logout_cookie}")
@@ -511,6 +511,7 @@ with top_cols_main[1]:
               print("WARNING: CookieManager not ready during logout, cannot clear cookies.")
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 # --- 메인 앱 제목 (로그인 후) ---
 # (이전과 동일)
@@ -527,14 +528,15 @@ st.markdown("""
 def load_vector_db_from_blob_cached(_container_client):
     if not _container_client:
         print("ERROR: Blob Container client is None for load_vector_db_from_blob_cached.")
-        return faiss.IndexFlatL2(1536), []
-    current_embedding_dimension = 1536 # text-embedding-3-small 기본값
+        return faiss.IndexFlatL2(1536), [] # 기본 임베딩 차원 (text-embedding-3-small)
+    current_embedding_dimension = 1536 
     idx, meta = faiss.IndexFlatL2(current_embedding_dimension), []
     print(f"Attempting to load vector DB from Blob: '{INDEX_BLOB_NAME}', '{METADATA_BLOB_NAME}' with dimension {current_embedding_dimension}")
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             local_index_path = os.path.join(tmpdir, os.path.basename(INDEX_BLOB_NAME))
             local_metadata_path = os.path.join(tmpdir, os.path.basename(METADATA_BLOB_NAME))
+            
             index_blob_client = _container_client.get_blob_client(INDEX_BLOB_NAME)
             if index_blob_client.exists():
                 print(f"Downloading '{INDEX_BLOB_NAME}'...")
@@ -547,7 +549,7 @@ def load_vector_db_from_blob_cached(_container_client):
                         if idx.d != current_embedding_dimension:
                             print(f"WARNING: Loaded FAISS index dimension ({idx.d}) does not match expected dimension ({current_embedding_dimension}). Re-initializing.")
                             idx = faiss.IndexFlatL2(current_embedding_dimension)
-                            meta = []
+                            meta = [] # 메타데이터도 함께 초기화
                         else:
                             print(f"'{INDEX_BLOB_NAME}' loaded successfully from Blob Storage. Dimension: {idx.d}")
                     except Exception as e_faiss_read:
@@ -556,28 +558,44 @@ def load_vector_db_from_blob_cached(_container_client):
                         meta = []
                 else:
                     print(f"WARNING: '{INDEX_BLOB_NAME}' is empty in Blob. Using new index.")
-                    idx = faiss.IndexFlatL2(current_embedding_dimension)
+                    idx = faiss.IndexFlatL2(current_embedding_dimension) # 메타데이터도 비워야 함
+                    meta = []
             else:
                 print(f"WARNING: '{INDEX_BLOB_NAME}' not found in Blob Storage. New index will be used/created.")
                 idx = faiss.IndexFlatL2(current_embedding_dimension)
+                meta = [] # 새 인덱스이므로 메타데이터도 비움
 
-            metadata_blob_client = _container_client.get_blob_client(METADATA_BLOB_NAME)
-            if metadata_blob_client.exists() and idx.ntotal > 0:
-                print(f"Downloading '{METADATA_BLOB_NAME}'...")
-                with open(local_metadata_path, "wb") as download_file:
-                    download_stream = metadata_blob_client.download_blob(timeout=60)
-                    download_file.write(download_stream.readall())
-                if os.path.getsize(local_metadata_path) > 0 :
-                    with open(local_metadata_path, "r", encoding="utf-8") as f: meta = json.load(f)
-                else:
+            # 메타데이터는 인덱스가 성공적으로 로드되었거나, 새로 생성되었을 때만 로드/초기화
+            if idx is not None: # idx가 None일 가능성은 위에서 처리했지만, 방어적으로 체크
+                metadata_blob_client = _container_client.get_blob_client(METADATA_BLOB_NAME)
+                # 인덱스에 아이템이 있거나, 인덱스 파일이 존재해서 로드 시도했을 때만 메타데이터 로드
+                # (완전히 새로 생성된 빈 인덱스면 메타데이터도 비어있어야 함)
+                if metadata_blob_client.exists() and (idx.ntotal > 0 or os.path.exists(local_index_path)): 
+                    print(f"Downloading '{METADATA_BLOB_NAME}'...")
+                    with open(local_metadata_path, "wb") as download_file: # wb로 다운로드 후 r로 읽기
+                        download_stream_meta = metadata_blob_client.download_blob(timeout=60)
+                        download_file.write(download_stream_meta.readall())
+                    if os.path.getsize(local_metadata_path) > 0 :
+                        with open(local_metadata_path, "r", encoding="utf-8") as f_meta: meta = json.load(f_meta)
+                    else: # 메타데이터 파일은 존재하나 비어있는 경우
+                        meta = []
+                        print(f"WARNING: '{METADATA_BLOB_NAME}' is empty in Blob.")
+                elif idx.ntotal == 0 and not index_blob_client.exists(): # 인덱스 파일도 없고, ntotal도 0이면 (완전 처음)
+                     print(f"WARNING: Index is new and empty, starting with empty metadata.")
+                     meta = []
+                else: # 인덱스 파일은 없지만 (새로 생성), 메타데이터 파일도 없는 경우
+                    print(f"WARNING: '{METADATA_BLOB_NAME}' not found in Blob Storage. Starting with empty metadata.")
                     meta = []
-                    print(f"WARNING: '{METADATA_BLOB_NAME}' is empty in Blob.")
-            elif idx.ntotal == 0:
-                 print(f"WARNING: Index is empty or re-initialized, starting with empty metadata.")
-                 meta = []
-            else:
-                print(f"WARNING: '{METADATA_BLOB_NAME}' not found in Blob Storage. Starting with empty metadata.")
+            
+            # 최종 동기화: 인덱스에 아이템이 없으면 메타데이터도 비어있어야 함
+            if idx is not None and idx.ntotal == 0 and len(meta) > 0:
+                print(f"WARNING: FAISS index is empty (ntotal=0) but metadata is not. Clearing metadata for consistency.")
                 meta = []
+            elif idx is not None and idx.ntotal > 0 and not meta:
+                print(f"CRITICAL WARNING: FAISS index has data (ntotal={idx.ntotal}) but metadata is empty. This may lead to errors. Consider re-indexing.")
+                # st.error("벡터 DB 인덱스와 메타데이터 불일치 발생! 관리자에게 문의하거나 파일 재학습 필요.")
+                # idx = faiss.IndexFlatL2(current_embedding_dimension); meta = [] # 안전을 위해 초기화
+
     except AzureError as ae:
         st.error(f"Azure Blob에서 벡터DB 로드 중 Azure 서비스 오류: {ae}")
         print(f"AZURE ERROR loading vector DB from Blob: {ae}\n{traceback.format_exc()}")
@@ -588,7 +606,8 @@ def load_vector_db_from_blob_cached(_container_client):
         idx = faiss.IndexFlatL2(current_embedding_dimension); meta = []
     return idx, meta
 
-index, metadata = faiss.IndexFlatL2(1536), []
+
+index, metadata = faiss.IndexFlatL2(1536), [] # 기본값 설정
 if container_client:
     index, metadata = load_vector_db_from_blob_cached(container_client)
     print(f"DEBUG: FAISS index loaded after cache. ntotal: {index.ntotal if index else 'Index is None'}, dimension: {index.d if index else 'N/A'}")
@@ -600,29 +619,29 @@ else:
 # --- 규칙 파일 로드 ---
 @st.cache_data
 def load_prompt_rules_cached():
-    # (가장 최근 프롬프트 규칙으로 default_rules 업데이트된 버전)
     default_rules = """1.우선 기준
-    1.1. 모든 답변은 컨텍스트로 제공된 참고 문서(첨부 파일, 학습된 SOP 등)의 내용을 최우선으로 하며, 그 다음은 MFDS 규정, 그리고 사내 SOP 순서를 기준으로 삼습니다.
+    1.1. 모든 답변은 컨텍스트로 제공된 참고 문서(첨부 파일, 학습된 SOP/이미지 설명 등)의 내용을 최우선으로 하며, 그 다음은 MFDS 규정, 그리고 사내 SOP 순서를 기준으로 삼습니다.
     1.2. 규정/법령 위반 또는 회색지대의 경우, 관련 문서명, 조항번호, 조항내용과 함께 명확히 경고해야 합니다.
     1.3. 질문에 대한 답변 근거를 제공된 참고 문서나 규정에서 찾을 수 없을 경우, "명확한 규정이나 참고 자료를 찾을 수 없습니다. 내부 QA 검토 필요"임을 고지합니다.
-    1.4. 답변을 생성할 때, 컨텍스트로 제공된 문서 내용을 참고했다면 해당 문서의 내용에서 파악되는 주요 식별 정보(예: 문서 제목, 문서 번호, 섹션 제목 등)와 함께 [출처: 파일명.pdf] 형식으로 출처 파일명을 언급해야 합니다. (예: "OOO 문서(파일명: XXX.pdf)의 '데이터 백업 절차' 섹션에 따르면...", "SOP-001 '문서 관리 절차서'(파일명: YYY.pdf)에서는...") 만약 문서 내용에서 명확한 제목이나 번호를 찾기 어렵다면 [출처: 파일명.pdf]만 언급합니다.
+    1.4. 답변을 생성할 때, 컨텍스트로 제공된 문서 내용을 참고했다면 해당 문서의 내용에서 파악되는 주요 식별 정보(예: 문서 제목, 문서 번호, 섹션 제목, 이미지 파일명 등)와 함께 [출처: 파일명.pdf 또는 이미지 설명: 이미지명.png] 형식으로 출처 파일명을 언급해야 합니다. 만약 문서 내용에서 명확한 제목이나 번호를 찾기 어렵다면 [출처: 파일명.ext] 또는 [Image Description for: 이미지명.ext]만 언급합니다.
 
 2.응답 방식
     2.1. 존댓말을 사용하며, 전문적이고 친절한 어조로 답변합니다.
-    2.2. 모든 답변은 논리적 구조, 높은 정확성, 실용성을 갖추어야 하며, 필요한 경우 예시 및 설명을 포함하여 전문가 수준을 유지합니다. 답변에는 가능한 한 참고한 근거(문서 내용에서 파악된 SOP 제목/번호, 규정명, 조항 등)와 [출처: 파일명.pdf]를 함께 제시합니다.
+    2.2. 모든 답변은 논리적 구조, 높은 정확성, 실용성을 갖추어야 하며, 필요한 경우 예시 및 설명을 포함하여 전문가 수준을 유지합니다. 답변에는 가능한 한 참고한 근거(문서 내용에서 파악된 SOP 제목/번호, 규정명, 조항, 이미지 내용 등)와 출처(규칙 1.4 참고)를 함께 제시합니다.
     2.3. 번역 시, 일반적인 번역체 대신 **한국 제약 산업 및 GMP 규정/가이드라인(MFDS, PIC/S, ICH 등)에서 통용되는 표준 전문 용어**를 사용하여 번역해야 합니다. (아래 '주요 번역 용어 가이드' 참고)
 
 3.기능 제한 및 파일 처리
-    3.1. 다루는 주제: 사내 SOP (Standard Operating Procedure) 내용 질의응답, GMP 가이드라인(FDA, PIC/S, EU-GMP, cGMP, MFDS 등), DI 규정, 외국 규정 번역 등 업무 관련 내용 및 사용자가 첨부한 파일의 내용 분석 (요약, 설명, 비교 등).
-    3.2. 파일 첨부 시 및 내부 SOP 참고 시 처리:
-        - 사용자가 파일을 첨부하여 질문하거나, 질문이 내부적으로 학습된 SOP 문서와 관련된 경우, 해당 파일 또는 SOP의 내용을 최우선으로 분석하고 참고하여 답변해야 합니다.
-        - 사용자가 '전체 번역'을 명시적으로 요청하는 경우, 다른 모든 규칙(특히 간결성 규칙 및 출처 명시 규칙)에 우선하여 첨부된 문서의 내용을 처음부터 끝까지 순서대로 번역해야 합니다. 번역 결과는 모델의 최대 출력 토큰(16384 토큰) 내에서 생성되며, 내용이 길 경우 번역이 중간에 완료될 수 있습니다. 이 경우, 번역된 내용의 출처 파일명 [출처: 파일명.pdf] 정도만 언급하거나, 문서 제목이 명확하다면 제목까지 언급할 수 있습니다.
-        - 번역 요청이 아니더라도, 파일 또는 학습된 SOP 내용을 기반으로 질문에 맞춰 요약, 설명, 비교 등의 답변을 생성해야 합니다. 이때, 규칙 1.4 및 2.2에 따라 참고한 출처를 명시합니다.
-        - 만약 파일 또는 학습된 SOP 내용이 다른 규정(예: MFDS 규정)과 상충될 가능성이 있다면, 그 점을 명확히 언급하고 사용자에게 확인을 요청해야 합니다. (예: "문의하신 SOP 내용(문서 제목 OO, [출처: YYY.pdf])에 따르면 OOO이지만, 이는 현재 MFDS 규정 XXX와 다를 수 있으니 확인이 필요합니다.")
+    3.1. 다루는 주제: 사내 SOP (Standard Operating Procedure) 내용 질의응답, GMP 가이드라인(FDA, PIC/S, EU-GMP, cGMP, MFDS 등), DI 규정, 외국 규정 번역 등 업무 관련 내용 및 사용자가 첨부한 파일(텍스트 문서 또는 이미지)의 내용 분석 (요약, 설명, 비교 등).
+    3.2. 파일 첨부 시(텍스트 또는 이미지) 및 내부 SOP 참고 시 처리:
+        - 사용자가 파일을 첨부하여 질문하거나, 질문이 내부적으로 학습된 SOP 문서(또는 이미지 설명)와 관련된 경우, 해당 파일 또는 SOP의 내용을 최우선으로 분석하고 참고하여 답변해야 합니다.
+        - 이미지가 첨부된 경우, 이미지의 내용을 이해하고 설명한 내용을 바탕으로 답변을 생성합니다.
+        - 사용자가 '전체 번역'을 명시적으로 요청하는 경우 (텍스트 파일에 한함), 다른 모든 규칙(특히 간결성 규칙 및 출처 명시 규칙)에 우선하여 첨부된 문서의 내용을 처음부터 끝까지 순서대로 번역해야 합니다. 번역 결과는 모델의 최대 출력 토큰 내에서 생성되며, 내용이 길 경우 번역이 중간에 완료될 수 있습니다. 이 경우, 번역된 내용의 출처 파일명 [출처: 파일명.pdf] 정도만 언급하거나, 문서 제목이 명확하다면 제목까지 언급할 수 있습니다.
+        - 번역 요청이 아니더라도, 파일(텍스트 또는 이미지 설명) 또는 학습된 SOP 내용을 기반으로 질문에 맞춰 요약, 설명, 비교 등의 답변을 생성해야 합니다. 이때, 규칙 1.4 및 2.2에 따라 참고한 출처를 명시합니다.
+        - 만약 파일 또는 학습된 SOP 내용이 다른 규정(예: MFDS 규정)과 상충될 가능성이 있다면, 그 점을 명확히 언급하고 사용자에게 확인을 요청해야 합니다.
     3.3. 사용자가 파일을 첨부하고 해당 파일의 내용에 대해 질문하거나, 학습된 SOP 내용에 대해 질문하는 경우는 업무 관련 질문으로 간주합니다. 이 경우를 제외하고, 개인적인 질문, 뉴스, 여가 등 업무와 직접 관련 없는 질문은 “업무 관련 질문만 처리합니다.”로 간결히 응답합니다.
 
 4.챗봇 소개 안내
-    4.1. 사용자가 인사하거나 기능을 물을 경우, 본 챗봇의 역할("한국 제약 산업의 DI/GMP 규정 및 사내 SOP 전문가 챗봇")과 처리 가능한 업무 범위를 간단히 소개합니다.
+    4.1. 사용자가 인사하거나 기능을 물을 경우, 본 챗봇의 역할("한국 제약 산업의 DI/GMP 규정 및 사내 SOP 전문가 챗봇")과 처리 가능한 업무 범위(텍스트 및 이미지 파일 내용 분석 포함)를 간단히 소개합니다.
 
 5.표현 및 형식 규칙
     5.1. Markdown 스타일 강조는 사용하지 않습니다.
@@ -652,11 +671,20 @@ def load_prompt_rules_cached():
 PROMPT_RULES_CONTENT = load_prompt_rules_cached()
 
 # --- 텍스트 처리 함수들 ---
-# (extract_text_from_file, chunk_text_into_pieces 이전과 동일)
-def extract_text_from_file(uploaded_file_obj):
-    ext = os.path.splitext(uploaded_file_obj.name)[1].lower(); text_content = ""
+def extract_text_from_file(uploaded_file_obj): # 이미지 처리는 이 함수 밖에서 분기
+    ext = os.path.splitext(uploaded_file_obj.name)[1].lower()
+    text_content = ""
+    
+    # 이미지 확장자는 여기서 처리하지 않음 (또는 명시적으로 빈 문자열 반환)
+    if ext in [".png", ".jpg", ".jpeg"]:
+        # st.info(f"'{uploaded_file_obj.name}'은 이미지 파일입니다. 이 함수는 텍스트 추출 전용입니다.")
+        print(f"DEBUG extract_text_from_file: Skipped image file '{uploaded_file_obj.name}'.")
+        return "" # 또는 None
+
     try:
-        uploaded_file_obj.seek(0); file_bytes = uploaded_file_obj.read()
+        uploaded_file_obj.seek(0)
+        file_bytes = uploaded_file_obj.read()
+        
         if ext == ".pdf":
             with fitz.open(stream=file_bytes, filetype="pdf") as doc: text_content = "\n".join(page.get_text() for page in doc)
         elif ext == ".docx":
@@ -673,29 +701,124 @@ def extract_text_from_file(uploaded_file_obj):
                 text_content = df.to_string(index=False)
         elif ext == ".pptx":
             with io.BytesIO(file_bytes) as ppt_io: prs = Presentation(ppt_io); text_content = "\n".join(shape.text for slide in prs.slides for shape in slide.shapes if hasattr(shape, "text"))
-        else: st.warning(f"지원하지 않는 파일 형식입니다: {ext}"); return ""
+        elif ext == ".txt":
+            try:
+                text_content = file_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                try:
+                    text_content = file_bytes.decode('cp949') # 다른 인코딩 시도
+                except Exception as e_txt_decode:
+                    st.warning(f"'{uploaded_file_obj.name}' TXT 파일 디코딩 실패: {e_txt_decode}. 내용을 비워둡니다.")
+                    text_content = "" 
+        else: 
+            st.warning(f"지원하지 않는 텍스트 파일 형식입니다: {ext} (파일명: {uploaded_file_obj.name})")
+            return "" # 지원하지 않는 텍스트 파일도 빈 내용 반환
     except Exception as e:
         st.error(f"'{uploaded_file_obj.name}' 파일 내용 추출 중 오류: {e}")
         print(f"Error extracting text from '{uploaded_file_obj.name}': {e}\n{traceback.format_exc()}")
         return ""
     return text_content.strip()
 
-def chunk_text_into_pieces(text_to_chunk, chunk_size=500):
+
+def chunk_text_into_pieces(text_to_chunk, chunk_size=500): # 청크 크기는 필요시 조절
     if not text_to_chunk or not text_to_chunk.strip(): return [];
     chunks_list, current_buffer = [], ""
-    for line in text_to_chunk.split("\n"):
+    # 더 긴 줄바꿈이나 문단 구분을 기준으로 청킹하도록 개선 (선택적)
+    # 예: sentences = text_to_chunk.split('. ') # 문장 단위로 나누고 합치기
+    for line in text_to_chunk.split("\n"): # 현재는 줄바꿈 기준
         stripped_line = line.strip()
-        if not stripped_line and not current_buffer.strip(): continue
-        if len(current_buffer) + len(stripped_line) + 1 < chunk_size:
+        if not stripped_line and not current_buffer.strip(): continue # 연속된 빈 줄 무시
+        
+        # 현재 버퍼에 추가했을 때 청크 크기를 넘는지 확인
+        if len(current_buffer) + len(stripped_line) + 1 < chunk_size: # +1 for newline
             current_buffer += stripped_line + "\n"
-        else:
-            if current_buffer.strip(): chunks_list.append(current_buffer.strip())
-            current_buffer = stripped_line + "\n"
-    if current_buffer.strip(): chunks_list.append(current_buffer.strip())
-    return [c for c in chunks_list if c]
+        else: # 청크 크기를 넘으면
+            if current_buffer.strip(): # 현재 버퍼에 내용이 있으면 청크로 추가
+                chunks_list.append(current_buffer.strip())
+            current_buffer = stripped_line + "\n" # 새 버퍼 시작
+            
+    if current_buffer.strip(): # 마지막 버퍼 내용 추가
+        chunks_list.append(current_buffer.strip())
+        
+    return [c for c in chunks_list if c] # 최종적으로 빈 청크 제거
 
-# --- <<< get_text_embedding 함수에 디버깅 로그 및 예외 처리 강화 >>> ---
+# --- 이미지 설명 생성 함수 ---
+def get_image_description(image_bytes, image_filename, client_instance):
+    if not client_instance:
+        st.error("OpenAI 클라이언트가 준비되지 않아 이미지 설명을 생성할 수 없습니다.")
+        print("ERROR get_image_description: OpenAI client not ready.")
+        return None
+    
+    print(f"DEBUG get_image_description: Requesting description for image '{image_filename}'")
+    try:
+        base64_image = base64.b64encode(image_bytes).decode('utf-8')
+        
+        # 이미지 확장자에 따라 "image/jpeg" 또는 "image/png" 등을 사용
+        image_ext_desc = os.path.splitext(image_filename)[1].lower()
+        mime_type = "image/jpeg" # 기본값
+        if image_ext_desc == ".png":
+            mime_type = "image/png"
+        elif image_ext_desc == ".jpg" or image_ext_desc == ".jpeg":
+            mime_type = "image/jpeg"
+        # 다른 이미지 타입이 있다면 추가 (예: gif, webp 등)
+
+        vision_model_deployment = st.secrets["AZURE_OPENAI_DEPLOYMENT"] 
+        print(f"DEBUG get_image_description: Using vision model deployment: {vision_model_deployment}")
+
+        response = client_instance.chat.completions.create(
+            model=vision_model_deployment,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": f"이 이미지를 업무적 관점에서 자세히 설명해주세요. 이 설명은 나중에 텍스트 검색을 통해 이미지를 찾거나, 이미지 속 상황을 파악하는 데 사용됩니다. 이미지 파일명은 '{image_filename}'입니다. 이미지의 주요 객체, 상태, 가능한 맥락, 그리고 만약 GMP/SOP와 관련된 요소가 있다면 그것도 언급해주세요."},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{base64_image}" 
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=IMAGE_DESCRIPTION_MAX_TOKENS, 
+            temperature=0.2, # 좀 더 사실 기반의 설명을 위해 낮은 값
+            timeout=AZURE_OPENAI_TIMEOUT 
+        )
+        description = response.choices[0].message.content.strip()
+        print(f"DEBUG get_image_description: Description for '{image_filename}' (len: {len(description)} chars) generated successfully.")
+        return description
+    except APIStatusError as ase:
+        st.error(f"이미지 설명 생성 중 API 오류 (상태 코드 {ase.status_code}): {ase.message}.")
+        print(f"API STATUS ERROR during image description for '{image_filename}' (Status {ase.status_code}): {ase.message}")
+        if ase.response and ase.response.content:
+            try:
+                error_details = json.loads(ase.response.content.decode('utf-8'))
+                print(f"DEBUG get_image_description: Azure API error details: {json.dumps(error_details, indent=2, ensure_ascii=False)}")
+            except Exception as json_e:
+                print(f"DEBUG get_image_description: Could not parse Azure API error content as JSON: {json_e}")
+        return None
+    except APITimeoutError:
+        st.error(f"이미지 '{image_filename}' 설명 생성 중 시간 초과가 발생했습니다.")
+        print(f"TIMEOUT ERROR during image description for '{image_filename}'.")
+        return None
+    except APIConnectionError as ace:
+        st.error(f"이미지 '{image_filename}' 설명 생성 중 API 연결 오류가 발생했습니다: {ace}.")
+        print(f"API CONNECTION ERROR during image description for '{image_filename}': {ace}")
+        return None
+    except RateLimitError as rle:
+        st.error(f"이미지 '{image_filename}' 설명 생성 중 API 요청량 제한에 도달했습니다: {rle}.")
+        print(f"RATE LIMIT ERROR during image description for '{image_filename}': {rle}")
+        return None
+    except Exception as e:
+        st.error(f"이미지 '{image_filename}' 설명 생성 중 예기치 않은 오류: {e}")
+        print(f"UNEXPECTED ERROR during image description for '{image_filename}': {e}\n{traceback.format_exc()}")
+        return None
+
+
+# --- 텍스트 임베딩 함수 (디버깅 로그 및 예외 처리 강화) ---
 def get_text_embedding(text_to_embed):
+    # (이전과 동일 - 변경 없음)
     if not openai_client or not EMBEDDING_MODEL:
         print("ERROR: OpenAI client or embedding model not ready for get_text_embedding (called).")
         return None
@@ -709,7 +832,7 @@ def get_text_embedding(text_to_embed):
         response = openai_client.embeddings.create(
             input=[text_to_embed],
             model=EMBEDDING_MODEL,
-            timeout=AZURE_OPENAI_TIMEOUT / 2
+            timeout=AZURE_OPENAI_TIMEOUT / 2 
         )
         print("Embedding received.")
         return response.data[0].embedding
@@ -742,8 +865,9 @@ def get_text_embedding(text_to_embed):
         print(f"UNEXPECTED ERROR during embedding (get_text_embedding): {e}\n{traceback.format_exc()}")
         return None
 
-# --- <<< 수정된 search_similar_chunks 함수 (딕셔너리 리스트 반환) >>> ---
-def search_similar_chunks(query_text, k_results=3):
+# --- 유사도 검색 함수 (딕셔너리 리스트 반환) ---
+def search_similar_chunks(query_text, k_results=3): # k_results는 필요시 조절
+    # (이전과 동일 - 변경 없음)
     print(f"DEBUG search_similar_chunks: Called with query '{query_text[:30]}...', k_results={k_results}")
     if index is None:
         print("DEBUG search_similar_chunks: FAISS index is None.")
@@ -751,7 +875,7 @@ def search_similar_chunks(query_text, k_results=3):
     if index.ntotal == 0:
         print("DEBUG search_similar_chunks: FAISS index is empty (ntotal=0).")
         return []
-    if not metadata:
+    if not metadata: # metadata가 None이거나 비어있을 때
         print("DEBUG search_similar_chunks: Metadata is empty or None.")
         return []
 
@@ -773,12 +897,18 @@ def search_similar_chunks(query_text, k_results=3):
         results_with_source = []
         if len(indices_found[0]) > 0:
             for i_val in indices_found[0]:
-                if 0 <= i_val < len(metadata):
+                if 0 <= i_val < len(metadata): # metadata 인덱스 범위 확인
                     meta_item = metadata[i_val]
-                    results_with_source.append({
-                        "source": meta_item.get("file_name", "출처 불명"),
-                        "content": meta_item.get("content", "")
-                    })
+                    # 메타데이터가 예상된 딕셔너리 형태인지 확인 (선택적 강화)
+                    if isinstance(meta_item, dict):
+                        results_with_source.append({
+                            "source": meta_item.get("file_name", "출처 불명"), # 원본 파일명
+                            "content": meta_item.get("content", ""), # 청크 내용 (텍스트 또는 이미지 설명)
+                            "is_image_description": meta_item.get("is_image_description", False), # 이미지 설명 여부 플래그
+                            "original_file_extension": meta_item.get("original_file_extension", "") # 원본 확장자
+                        })
+                    else:
+                        print(f"WARNING search_similar_chunks: Metadata item at index {i_val} is not a dict: {meta_item}")
         print(f"Similarity search found {len(results_with_source)} relevant chunks with source.")
         return results_with_source
     except Exception as e:
@@ -786,32 +916,45 @@ def search_similar_chunks(query_text, k_results=3):
         print(f"ERROR: Similarity search failed: {e}\n{traceback.format_exc()}")
         return []
 
+
 # --- 문서 추가, 원본 저장, 사용량 로깅 함수 ---
-# (add_document_to_vector_db_and_blob, save_original_file_to_blob, log_openai_api_usage_to_blob 이전과 동일 - 단, add_document... 함수 내 차원 검증 로직 포함)
-def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chunks, _container_client):
+def add_document_to_vector_db_and_blob(uploaded_file_obj, processed_content, text_chunks, _container_client, is_image_description=False):
     global index, metadata
-    if not text_chunks: st.warning(f"'{uploaded_file_obj.name}' 파일에서 처리할 내용이 없습니다."); return False
-    if not _container_client: st.error("Azure Blob 클라이언트가 준비되지 않아 학습 결과를 저장할 수 없습니다."); return False
+    if not text_chunks: 
+        st.warning(f"'{uploaded_file_obj.name}' 파일에서 처리할 내용(텍스트 또는 이미지 설명)이 없습니다.")
+        return False
+    if not _container_client: 
+        st.error("Azure Blob 클라이언트가 준비되지 않아 학습 결과를 저장할 수 없습니다.")
+        return False
 
     vectors_to_add, new_metadata_entries_for_current_file = [], []
     embedding_failed_for_some_chunks = False
+    
+    file_type_for_log = "이미지 설명" if is_image_description else "텍스트"
+    print(f"Adding '{file_type_for_log}' from '{uploaded_file_obj.name}' to vector DB.")
+
     for chunk_idx, chunk in enumerate(text_chunks):
-        print(f"Processing chunk {chunk_idx+1}/{len(text_chunks)} for embedding from '{uploaded_file_obj.name}'...")
-        embedding = get_text_embedding(chunk)
+        print(f"Processing chunk {chunk_idx+1}/{len(text_chunks)} for embedding from '{uploaded_file_obj.name}' ({file_type_for_log})...")
+        embedding = get_text_embedding(chunk) # 청크는 텍스트(원본 또는 이미지 설명)
         if embedding is not None:
             vectors_to_add.append(embedding)
-            new_metadata_entries_for_current_file.append({"file_name": uploaded_file_obj.name, "content": chunk})
+            new_metadata_entries_for_current_file.append({
+                "file_name": uploaded_file_obj.name, # 원본 파일명 (이미지 또는 텍스트 문서)
+                "content": chunk, # 실제 임베딩된 내용 (텍스트 청크 또는 이미지 설명 청크)
+                "is_image_description": is_image_description,
+                "original_file_extension": os.path.splitext(uploaded_file_obj.name)[1].lower()
+            })
         else:
             embedding_failed_for_some_chunks = True
             print(f"Warning: Failed to get embedding for a chunk in '{uploaded_file_obj.name}'. Skipping chunk.")
 
     if embedding_failed_for_some_chunks and not vectors_to_add:
-        st.error(f"'{uploaded_file_obj.name}' 파일의 모든 내용에 대한 임베딩 생성에 실패했습니다. 학습되지 않았습니다.")
+        st.error(f"'{uploaded_file_obj.name}' 파일의 모든 내용({file_type_for_log})에 대한 임베딩 생성에 실패했습니다. 학습되지 않았습니다.")
         return False
     elif embedding_failed_for_some_chunks:
-         st.warning(f"'{uploaded_file_obj.name}' 파일의 일부 내용에 대한 임베딩 생성에 실패했습니다. 성공한 부분만 학습됩니다.")
+         st.warning(f"'{uploaded_file_obj.name}' 파일의 일부 내용({file_type_for_log})에 대한 임베딩 생성에 실패했습니다. 성공한 부분만 학습됩니다.")
 
-    if not vectors_to_add:
+    if not vectors_to_add: # 임베딩된 벡터가 하나도 없으면
         st.warning(f"'{uploaded_file_obj.name}' 파일에서 유효한 임베딩을 생성하지 못했습니다. 학습되지 않았습니다.");
         return False
 
@@ -820,7 +963,7 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chu
         if index is None or index.d != current_embedding_dimension:
             print(f"WARNING: FAISS index dimension ({index.d if index else 'None'}) mismatch or index is None. Re-initializing with dimension {current_embedding_dimension}.")
             index = faiss.IndexFlatL2(current_embedding_dimension)
-            metadata = []
+            metadata = [] # 인덱스 재생성 시 메타데이터도 초기화
 
         if vectors_to_add: index.add(np.array(vectors_to_add).astype("float32"))
         metadata.extend(new_metadata_entries_for_current_file)
@@ -828,25 +971,28 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chu
 
         with tempfile.TemporaryDirectory() as tmpdir:
             temp_index_path = os.path.join(tmpdir, "temp.index")
-            if index.ntotal > 0 :
+            if index.ntotal > 0 : # 인덱스에 아이템이 있을 때만 저장
                  faiss.write_index(index, temp_index_path)
                  if not save_binary_data_to_blob(temp_index_path, INDEX_BLOB_NAME, _container_client, "벡터 인덱스"):
-                    st.error("벡터 인덱스 Blob 저장 실패"); return False
-            else:
+                    st.error("벡터 인덱스 Blob 저장 실패"); return False # 저장 실패 시 False 반환
+            else: # 빈 인덱스면 저장 건너뛰기 (또는 빈 파일로 덮어쓰도록 할 수도 있음)
                 print(f"Skipping saving empty index to Blob: {INDEX_BLOB_NAME}")
+                # 만약 Blob에 기존 인덱스 파일이 있다면 삭제하거나 빈 파일로 덮어쓰는 로직 추가 가능
 
-        if not save_data_to_blob(metadata, METADATA_BLOB_NAME, _container_client, "메타데이터"):
+        if not save_data_to_blob(metadata, METADATA_BLOB_NAME, _container_client, "메타데이터"): # 메타데이터는 항상 저장 (빈 리스트일 수도 있음)
             st.error("메타데이터 Blob 저장 실패"); return False
 
         user_info = st.session_state.get("user", {}); uploader_name = user_info.get("name", "N/A")
-        new_log_entry = {"file": uploaded_file_obj.name, "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        new_log_entry = {"file": uploaded_file_obj.name, 
+                         "type": "image" if is_image_description else "text_document",
+                         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                          "chunks_added": len(vectors_to_add), "uploader": uploader_name}
 
         current_upload_logs = load_data_from_blob(UPLOAD_LOG_BLOB_NAME, _container_client, "업로드 로그", default_value=[])
-        if not isinstance(current_upload_logs, list): current_upload_logs = []
+        if not isinstance(current_upload_logs, list): current_upload_logs = [] # 로드 실패 시 기본값
         current_upload_logs.append(new_log_entry)
         if not save_data_to_blob(current_upload_logs, UPLOAD_LOG_BLOB_NAME, _container_client, "업로드 로그"):
-            st.warning("업로드 로그를 Blob에 저장하는 데 실패했습니다.")
+            st.warning("업로드 로그를 Blob에 저장하는 데 실패했습니다.") # 로그 저장은 실패해도 학습 자체는 성공으로 간주
         return True
     except Exception as e:
         st.error(f"문서 학습 또는 Azure Blob 업로드 중 오류: {e}")
@@ -854,13 +1000,15 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, text_content, text_chu
         return False
 
 def save_original_file_to_blob(uploaded_file_obj, _container_client):
-    # (이전과 동일)
+    # (이전과 동일 - 변경 없음)
     if not _container_client: st.error("Azure Blob 클라이언트가 준비되지 않아 원본 파일을 저장할 수 없습니다."); return None
     try:
-        uploaded_file_obj.seek(0)
+        uploaded_file_obj.seek(0) # 스트림 위치 초기화
+        # 파일명에 날짜시간 추가하여 중복 방지 및 추적 용이
         original_blob_name = f"uploaded_originals/{datetime.now().strftime('%Y%m%d%H%M%S')}_{uploaded_file_obj.name}"
         blob_client_for_original = _container_client.get_blob_client(blob=original_blob_name)
-        blob_client_for_original.upload_blob(uploaded_file_obj.getvalue(), overwrite=False, timeout=120)
+        # getvalue()를 사용하여 BytesIO 객체의 전체 내용을 전달
+        blob_client_for_original.upload_blob(uploaded_file_obj.getvalue(), overwrite=False, timeout=120) 
         print(f"Original file '{uploaded_file_obj.name}' saved to Blob as '{original_blob_name}'.")
         return original_blob_name
     except AzureError as ae:
@@ -872,8 +1020,8 @@ def save_original_file_to_blob(uploaded_file_obj, _container_client):
         print(f"GENERAL ERROR saving original file to Blob: {e}\n{traceback.format_exc()}")
         return None
 
-def log_openai_api_usage_to_blob(user_id_str, model_name_str, usage_stats_obj, _container_client):
-    # (이전과 동일)
+def log_openai_api_usage_to_blob(user_id_str, model_name_str, usage_stats_obj, _container_client, request_type="chat_completion"):
+    # (이전과 동일, request_type 파라미터 추가하여 구분 가능)
     if not _container_client:
         print("ERROR: Blob Container client is None for API usage log. Skipping log.")
         return
@@ -884,7 +1032,9 @@ def log_openai_api_usage_to_blob(user_id_str, model_name_str, usage_stats_obj, _
 
     new_log_entry = {
         "user_id": user_id_str, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "model_used": model_name_str, "prompt_tokens": prompt_tokens,
+        "model_used": model_name_str, 
+        "request_type": request_type, # 요청 종류 (예: "chat_completion", "embedding", "image_description")
+        "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens, "total_tokens": total_tokens
     }
 
@@ -907,9 +1057,8 @@ admin_settings_tab = main_tabs_list[1] if len(main_tabs_list) > 1 else None
 
 
 with chat_interface_tab:
-    # (이전과 동일, 단 컨텍스트 구성 시 수정된 search_similar_chunks 사용 반영)
     st.header("업무 질문")
-    st.markdown("💡 예시: SOP 백업 주기, PIC/S Annex 11 차이 등")
+    st.markdown("💡 예시: SOP 백업 주기, PIC/S Annex 11 차이, (파일 첨부 후) 이 사진 속 상황은 어떤 규정에 해당하나요? 등")
 
     if "messages" not in st.session_state:
         st.session_state["messages"] = []
@@ -919,55 +1068,109 @@ with chat_interface_tab:
         role, content, time_str = msg_item.get("role"), msg_item.get("content", ""), msg_item.get("time", "")
         align_class = "user-align" if role == "user" else "assistant-align"
         bubble_class = "user-bubble" if role == "user" else "assistant-bubble"
+        
+        # 이미지 URL이 content에 포함되어 있으면 이미지로 표시 (선택적 기능)
+        # if role == "user" and content.startswith("data:image"):
+        # st.markdown(f"""<div class="chat-bubble-container {align_class}"><img src="{content}" style="max-width: 300px; border-radius: 10px;"/><div class="timestamp">{time_str}</div></div>""", unsafe_allow_html=True)
+        # else:
         st.markdown(f"""<div class="chat-bubble-container {align_class}"><div class="bubble {bubble_class}">{content}</div><div class="timestamp">{time_str}</div></div>""", unsafe_allow_html=True)
 
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-    if st.button("📂 파일 첨부/숨기기", key="toggle_chat_uploader_final_v4_button"):
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True) # 간격 추가
+    if st.button("📂 파일 첨부/숨기기", key="toggle_chat_uploader_final_v5_button"): # 키 변경
         st.session_state.show_uploader = not st.session_state.get("show_uploader", False)
 
-    chat_file_uploader_key = "chat_file_uploader_final_v4_widget"
-    uploaded_chat_file_runtime = None
+    chat_file_uploader_key = "chat_file_uploader_final_v5_widget" # 키 변경
+    uploaded_chat_file_runtime = None # 위젯 상태 유지를 위해 밖에서 초기화
     if st.session_state.get("show_uploader", False):
         uploaded_chat_file_runtime = st.file_uploader("질문과 함께 참고할 파일 첨부 (선택 사항)",
-                                     type=["pdf","docx","xlsx","xlsm","csv","pptx"],
+                                     type=["pdf","docx","xlsx","xlsm","csv","pptx", "txt", "png", "jpg", "jpeg"], # 허용 타입 추가
                                      key=chat_file_uploader_key)
-        if uploaded_chat_file_runtime: st.caption(f"첨부됨: {uploaded_chat_file_runtime.name}")
+        if uploaded_chat_file_runtime: 
+            st.caption(f"첨부됨: {uploaded_chat_file_runtime.name} ({uploaded_chat_file_runtime.type}, {uploaded_chat_file_runtime.size} bytes)")
+            # 이미지 파일인 경우 미리보기 (선택적)
+            if uploaded_chat_file_runtime.type.startswith("image/"):
+                st.image(uploaded_chat_file_runtime, width=200)
 
-    with st.form("chat_input_form_final_v4", clear_on_submit=True):
+
+    with st.form("chat_input_form_final_v5", clear_on_submit=True): # 키 변경
         query_input_col, send_button_col = st.columns([4,1])
         with query_input_col:
             user_query_input = st.text_input("질문 입력:", placeholder="여기에 질문을 입력하세요...",
-                                             key="user_query_text_input_final_v4", label_visibility="collapsed")
+                                             key="user_query_text_input_final_v5", label_visibility="collapsed") # 키 변경
         with send_button_col:
             send_query_button = st.form_submit_button("전송")
 
     if send_query_button and user_query_input.strip():
         if not openai_client:
             st.error("OpenAI 서비스가 준비되지 않아 답변을 생성할 수 없습니다. 관리자에게 문의하세요.")
-        elif not tokenizer:
+        elif not tokenizer: # Tiktoken 로더 실패 시
              st.error("Tiktoken 라이브러리 로드 실패. 답변을 생성할 수 없습니다.")
         else:
             timestamp_now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-            st.session_state["messages"].append({"role":"user", "content":user_query_input, "time":timestamp_now_str})
+            
+            # 사용자 질문 메시지 추가 (이미지 파일명도 함께 표시 가능)
+            user_message_content = user_query_input
+            if uploaded_chat_file_runtime:
+                user_message_content += f"\n(첨부 파일: {uploaded_chat_file_runtime.name})"
+            st.session_state["messages"].append({"role":"user", "content":user_message_content, "time":timestamp_now_str})
+
 
             user_id_for_log = current_user_info.get("name", "anonymous_chat_user_runtime")
-
-            print(f"User '{user_id_for_log}' submitted query: '{user_query_input[:50]}...'")
+            print(f"User '{user_id_for_log}' submitted query: '{user_query_input[:50]}...' with file: {uploaded_chat_file_runtime.name if uploaded_chat_file_runtime else 'None'}")
+            
             with st.spinner("답변 생성 중... 잠시만 기다려주세요."):
                 assistant_response_content = "답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
                 try:
                     print("Step 1: Preparing context and calculating tokens...")
                     context_items_for_prompt = []
-                    temp_file_text = ""
+                    
+                    # --- 채팅 중 파일 처리 로직 ---
+                    text_from_chat_file = None
+                    is_chat_file_image_description = False
+                    chat_file_source_name_for_prompt = None
+
+                    if uploaded_chat_file_runtime:
+                        file_ext_chat = os.path.splitext(uploaded_chat_file_runtime.name)[1].lower()
+                        is_image_chat = file_ext_chat in [".png", ".jpg", ".jpeg"]
+                        
+                        if is_image_chat:
+                            print(f"DEBUG Chat: Processing uploaded image '{uploaded_chat_file_runtime.name}' for description.")
+                            with st.spinner(f"첨부 이미지 '{uploaded_chat_file_runtime.name}' 분석 중..."):
+                                image_bytes_chat = uploaded_chat_file_runtime.getvalue()
+                                description_chat = get_image_description(image_bytes_chat, uploaded_chat_file_runtime.name, openai_client)
+                            if description_chat:
+                                text_from_chat_file = description_chat
+                                chat_file_source_name_for_prompt = f"사용자 첨부 이미지: {uploaded_chat_file_runtime.name}" # (설명)은 나중에 붙임
+                                is_chat_file_image_description = True
+                                print(f"DEBUG Chat: Image description generated for '{uploaded_chat_file_runtime.name}'. Length: {len(description_chat)}")
+                            else:
+                                st.warning(f"채팅 중 첨부된 이미지 '{uploaded_chat_file_runtime.name}'의 설명을 생성하지 못했습니다. 해당 파일은 컨텍스트에서 제외됩니다.")
+                        else: # .txt, .pdf 등 텍스트 기반 파일
+                            print(f"DEBUG Chat: Extracting text from uploaded file '{uploaded_chat_file_runtime.name}'.")
+                            text_from_chat_file = extract_text_from_file(uploaded_chat_file_runtime)
+                            if text_from_chat_file:
+                                chat_file_source_name_for_prompt = f"사용자 첨부 파일: {uploaded_chat_file_runtime.name}"
+                                print(f"DEBUG Chat: Text extracted from '{uploaded_chat_file_runtime.name}'. Length: {len(text_from_chat_file)}")
+                            else:
+                                st.info(f"채팅 중 첨부된 '{uploaded_chat_file_runtime.name}' 파일이 비어있거나 지원하지 않는 내용입니다. 컨텍스트에서 제외됩니다.")
+                        
+                        if text_from_chat_file: # 내용이 있는 경우 (텍스트 또는 이미지 설명)
+                            context_items_for_prompt.append({
+                                "source": chat_file_source_name_for_prompt,
+                                "content": text_from_chat_file,
+                                "is_image_description": is_chat_file_image_description 
+                            })
+                    # --- 파일 처리 로직 끝 ---
 
                     prompt_structure = f"{PROMPT_RULES_CONTENT}\n\n위의 규칙을 반드시 준수하여 답변해야 합니다. 다음은 사용자의 질문에 답변하는 데 참고할 수 있는 문서의 내용입니다:\n<문서 시작>\n{{context}}\n<문서 끝>"
                     base_prompt_text = prompt_structure.replace('{context}', '')
                     try:
                         base_tokens = len(tokenizer.encode(base_prompt_text))
                         query_tokens = len(tokenizer.encode(user_query_input))
-                    except Exception as e:
-                        st.error(f"기본 프롬프트 또는 질문 토큰화 중 오류: {e}")
-                        raise
+                    except Exception as e_tokenize_base:
+                        st.error(f"기본 프롬프트 또는 질문 토큰화 중 오류: {e_tokenize_base}")
+                        raise # 더 이상 진행 불가
 
                     print(f"DEBUG: 기본 프롬프트 구조 토큰: {base_tokens}")
                     print(f"DEBUG: 사용자 질문 토큰: {query_tokens}")
@@ -976,62 +1179,63 @@ with chat_interface_tab:
                     print(f"DEBUG: 목표 프롬프트 토큰: {TARGET_INPUT_TOKENS_FOR_PROMPT}")
                     print(f"DEBUG: 컨텍스트에 할당 가능한 최대 토큰: {max_context_tokens}")
 
+                    context_string_for_llm = "현재 참고할 문서가 없습니다." # 기본값
                     if max_context_tokens <= 0:
-                         st.warning("프롬프트 규칙과 질문만으로도 입력 토큰 제한에 도달했습니다. 첨부파일 내용을 포함할 수 없습니다.")
+                         st.warning("프롬프트 규칙과 질문만으로도 입력 토큰 제한에 도달했습니다. 추가 컨텍스트(DB 검색 결과, 첨부 파일 내용)를 포함할 수 없습니다.")
                          print("WARNING: No tokens left for context after accounting for rules and query.")
                          context_string_for_llm = "참고할 컨텍스트를 포함할 수 없습니다 (토큰 제한)."
                     else:
-                        print(f"DEBUG: Retrieving context from Vector DB based on query: '{user_query_input[:50]}...'")
-                        retrieved_items_from_db = search_similar_chunks(user_query_input, k_results=3)
+                        # DB 검색 결과 추가 (사용자 질문 + 이미지 설명이 있다면 그것도 포함하여 검색)
+                        query_for_db_search = user_query_input
+                        if is_chat_file_image_description and text_from_chat_file: # 이미지 설명이 있다면 검색 쿼리에 추가
+                            query_for_db_search = f"{user_query_input}\n\n이미지 내용: {text_from_chat_file}"
+                        
+                        print(f"DEBUG: Retrieving context from Vector DB based on query: '{query_for_db_search[:50]}...'")
+                        retrieved_items_from_db = search_similar_chunks(query_for_db_search, k_results=3) # 검색 결과 개수 조절 가능
                         if retrieved_items_from_db:
-                            context_items_for_prompt.extend(retrieved_items_from_db) # 이제 딕셔너리 리스트를 extend
+                            context_items_for_prompt.extend(retrieved_items_from_db) # DB 검색 결과 추가
                             print(f"DEBUG: Retrieved {len(retrieved_items_from_db)} items from Vector DB with source info.")
                         else:
                             print(f"DEBUG: No relevant items found in Vector DB for query.")
-
-                        if uploaded_chat_file_runtime:
-                            print(f"DEBUG: Processing additionally uploaded file in chat: {uploaded_chat_file_runtime.name}")
-                            temp_file_text = extract_text_from_file(uploaded_chat_file_runtime)
-                            if temp_file_text:
-                                context_items_for_prompt.append({ # 딕셔너리 형태로 추가
-                                    "source": f"사용자 첨부 파일: {uploaded_chat_file_runtime.name}",
-                                    "content": temp_file_text
-                                })
-                                print(f"DEBUG: Added content from additionally uploaded file (full text) with source info.")
-                                print(f"DEBUG: Extracted text from uploaded file (first 100 chars): {temp_file_text[:100]}")
-                            else:
-                                st.info(f"채팅 중 첨부된 '{uploaded_chat_file_runtime.name}' 파일이 비어있거나 지원하지 않는 내용입니다.")
-
+                        
+                        # 컨텍스트 포맷팅 및 토큰 제한 적용
                         if not context_items_for_prompt:
-                            print("DEBUG: No context items found. Will use '현재 참고할 문서가 없습니다.'")
-                            context_string_for_llm = "현재 참고할 문서가 없습니다."
+                            print("DEBUG: No context items found (no file attached, no DB results).")
+                            # context_string_for_llm는 기본값 "현재 참고할 문서가 없습니다." 유지
                         else:
                             seen_contents_for_final_context = set()
                             formatted_context_chunks = []
-                            for item in context_items_for_prompt:
-                                # item이 딕셔너리인지, 아니면 이전 버전의 문자열 청크인지 확인
+                            for item_idx, item in enumerate(context_items_for_prompt):
                                 if isinstance(item, dict):
                                     content_value = item.get("content", "")
-                                    source_info = item.get('source', '출처 정보 없음')
-                                else: # 이전 버전 호환 (문자열 청크)
-                                    content_value = str(item)
-                                    source_info = '학습된 내용 (출처 파일명 확인 필요)' # 또는 다른 기본값
+                                    source_info = item.get('source', f'출처 정보 없음 {item_idx+1}')
+                                    is_desc_item = item.get("is_image_description", False)
+                                    
+                                    content_strip = content_value.strip()
+                                    if content_strip and content_strip not in seen_contents_for_final_context:
+                                        final_source_display_name = source_info
+                                        # 채팅 중 첨부 파일 소스 이름 정리
+                                        if source_info.startswith("사용자 첨부 이미지: "):
+                                            final_source_display_name = source_info.replace("사용자 첨부 이미지: ", "")
+                                        elif source_info.startswith("사용자 첨부 파일: "):
+                                            final_source_display_name = source_info.replace("사용자 첨부 파일: ", "")
 
-                                content_strip = content_value.strip()
-                                if content_strip and content_strip not in seen_contents_for_final_context:
-                                    formatted_context_chunks.append(f"[출처: {source_info}]\n{content_value}")
-                                    seen_contents_for_final_context.add(content_strip)
-
+                                        if is_desc_item:
+                                            formatted_context_chunks.append(f"[Image Description for: {final_source_display_name}]\n{content_value}")
+                                        else:
+                                            formatted_context_chunks.append(f"[출처: {final_source_display_name}]\n{content_value}")
+                                        seen_contents_for_final_context.add(content_strip)
+                                
                             if not formatted_context_chunks:
                                 print("DEBUG: No unique context items after filtering. Using '현재 참고할 문서가 없습니다.'")
-                                context_string_for_llm = "현재 참고할 문서가 없습니다."
+                                # context_string_for_llm는 기본값 "현재 참고할 문서가 없습니다." 유지
                             else:
                                 full_context_string = "\n\n---\n\n".join(formatted_context_chunks)
                                 try:
                                     full_context_tokens = tokenizer.encode(full_context_string)
-                                except Exception as e:
-                                    st.error(f"컨텍스트 문자열 토큰화 중 오류: {e}")
-                                    raise
+                                except Exception as e_tokenize_full_ctx:
+                                    st.error(f"컨텍스트 문자열 토큰화 중 오류: {e_tokenize_full_ctx}")
+                                    raise 
 
                                 print(f"DEBUG: 전체 컨텍스트 문자열 토큰 수 (출처 포함 포맷): {len(full_context_tokens)}")
 
@@ -1039,47 +1243,50 @@ with chat_interface_tab:
                                     truncated_tokens = full_context_tokens[:max_context_tokens]
                                     try:
                                         context_string_for_llm = tokenizer.decode(truncated_tokens)
-                                        if len(full_context_tokens) > len(truncated_tokens) :
-                                            context_string_for_llm += " (...내용 더 있음, 일부 내용이 잘렸을 수 있습니다.)"
-                                    except Exception as e:
-                                        st.error(f"잘린 토큰 디코딩 중 오류: {e}")
+                                        if len(full_context_tokens) > len(truncated_tokens) : # 잘렸음을 명시
+                                            context_string_for_llm += "\n(...내용 더 있음, 일부 내용이 잘렸을 수 있습니다.)"
+                                    except Exception as e_decode_truncated:
+                                        st.error(f"잘린 토큰 디코딩 중 오류: {e_decode_truncated}")
                                         context_string_for_llm = "[오류: 컨텍스트 디코딩 실패]"
                                     print(f"WARNING: 컨텍스트 토큰 수가 너무 많아 {max_context_tokens} 토큰으로 잘랐습니다.")
                                     print(f"DEBUG: 잘린 컨텍스트 문자열 (앞 100자): {context_string_for_llm[:100]}")
                                 else:
                                     context_string_for_llm = full_context_string
                                     print(f"DEBUG: 전체 컨텍스트를 사용합니다. (앞 100자): {context_string_for_llm[:100]}")
-
+                    
+                    # 최종 시스템 프롬프트 구성
                     system_prompt_content = prompt_structure.replace('{context}', context_string_for_llm)
                     try:
                         final_system_tokens = len(tokenizer.encode(system_prompt_content))
-                        final_prompt_tokens = final_system_tokens + query_tokens
-                    except Exception as e:
-                         st.error(f"최종 시스템 프롬프트 토큰화 중 오류: {e}")
+                        final_prompt_tokens = final_system_tokens + query_tokens # 시스템 프롬프트 + 사용자 질문
+                    except Exception as e_tokenize_final_sys:
+                         st.error(f"최종 시스템 프롬프트 토큰화 중 오류: {e_tokenize_final_sys}")
                          raise
 
                     print(f"DEBUG: 최종 시스템 프롬프트 토큰: {final_system_tokens}")
                     print(f"DEBUG: 최종 API 입력 토큰 (시스템+질문): {final_prompt_tokens}")
                     if final_prompt_tokens > MODEL_MAX_INPUT_TOKENS:
                          print(f"CRITICAL WARNING: 최종 입력 토큰({final_prompt_tokens})이 모델 최대치({MODEL_MAX_INPUT_TOKENS})를 초과했습니다! API 오류 가능성 높음.")
+                         # st.warning(f"입력 요청이 너무 깁니다 (현재 {final_prompt_tokens} 토큰, 최대 {MODEL_MAX_INPUT_TOKENS} 토큰). 답변이 생성되지 않거나 오류가 발생할 수 있습니다.")
 
-                    chat_messages = [{"role":"system", "content": system_prompt_content}, {"role":"user", "content": user_query_input}]
+                    chat_messages_for_api = [{"role":"system", "content": system_prompt_content}, {"role":"user", "content": user_query_input}]
 
-                    print("Step 2: Sending request to Azure OpenAI...")
+                    print("Step 2: Sending request to Azure OpenAI for chat completion...")
                     chat_completion_response = openai_client.chat.completions.create(
-                        model=st.secrets["AZURE_OPENAI_DEPLOYMENT"],
-                        messages=chat_messages,
-                        max_tokens=MODEL_MAX_OUTPUT_TOKENS,
-                        temperature=0.1,
+                        model=st.secrets["AZURE_OPENAI_DEPLOYMENT"], # 채팅용 모델
+                        messages=chat_messages_for_api,
+                        max_tokens=MODEL_MAX_OUTPUT_TOKENS, # 답변 최대 토큰
+                        temperature=0.1, # 답변 일관성
                         timeout=AZURE_OPENAI_TIMEOUT
                     )
                     assistant_response_content = chat_completion_response.choices[0].message.content.strip()
                     print("Azure OpenAI response received.")
 
                     if chat_completion_response.usage and container_client:
-                        print("Logging OpenAI API usage...")
-                        log_openai_api_usage_to_blob(user_id_for_log, st.secrets["AZURE_OPENAI_DEPLOYMENT"], chat_completion_response.usage, container_client)
-
+                        print("Logging OpenAI API usage for chat completion...")
+                        log_openai_api_usage_to_blob(user_id_for_log, st.secrets["AZURE_OPENAI_DEPLOYMENT"], chat_completion_response.usage, container_client, request_type="chat_completion_with_rag")
+                
+                # ... (이하 예외 처리 로직은 이전과 거의 동일)
                 except APITimeoutError:
                     assistant_response_content = "죄송합니다, 답변 생성 시간이 초과되었습니다. 질문을 조금 더 간단하게 해주시거나 잠시 후 다시 시도해주세요."
                     st.error(assistant_response_content)
@@ -1092,7 +1299,7 @@ with chat_interface_tab:
                     assistant_response_content = f"API 요청 한도를 초과했습니다: {rle}. 잠시 후 다시 시도해주세요."
                     st.error(assistant_response_content)
                     print(f"RATE LIMIT ERROR during chat completion: {rle}")
-                except APIStatusError as ase:
+                except APIStatusError as ase: # OpenAI API가 에러 상태 코드를 반환할 때
                     assistant_response_content = f"API에서 오류 응답을 받았습니다 (상태 코드 {ase.status_code}): {ase.message}. 문제가 지속되면 관리자에게 문의해주세요."
                     st.error(assistant_response_content)
                     print(f"API STATUS ERROR during chat completion (Status {ase.status_code}): {ase.message}")
@@ -1103,13 +1310,17 @@ with chat_interface_tab:
                         except Exception as json_e_chat:
                             print(f"DEBUG ChatCompletion: Could not parse Azure API error content as JSON: {json_e_chat}")
                             print(f"DEBUG ChatCompletion: Raw Azure API error content: {ase.response.content}")
-                except Exception as gen_err:
+                except Exception as gen_err: # 기타 예외 (토큰화 실패 등 포함)
                     assistant_response_content = f"답변 생성 중 예기치 않은 오류가 발생했습니다: {gen_err}. 관리자에게 문의해주세요."
                     st.error(assistant_response_content)
                     print(f"UNEXPECTED ERROR during response generation: {gen_err}\n{traceback.format_exc()}")
 
                 st.session_state["messages"].append({"role":"assistant", "content":assistant_response_content, "time":timestamp_now_str})
                 print("Response processing complete.")
+            
+            # 위젯 상태 초기화를 위해 uploaded_chat_file_runtime을 None으로 설정 (선택적)
+            # st.session_state[chat_file_uploader_key] = None # 이렇게 하면 업로더가 초기화됨
+            # 또는 그냥 st.rerun()만 호출
             st.rerun()
 
 
@@ -1117,7 +1328,7 @@ if admin_settings_tab:
     with admin_settings_tab:
         st.header("⚙️ 관리자 설정")
         st.subheader("👥 가입 승인 대기자")
-        # (이전과 동일)
+        # (이전과 동일 - 변경 없음)
         if not USERS or not isinstance(USERS, dict):
             st.warning("사용자 정보를 로드할 수 없거나 형식이 올바르지 않습니다.")
             print(f"WARNING: USERS data is problematic or empty in admin tab. Type: {type(USERS)}")
@@ -1127,12 +1338,12 @@ if admin_settings_tab:
                 for pending_uid, pending_user_data in pending_approval_users.items():
                     with st.expander(f"{pending_user_data.get('name','N/A')} ({pending_uid}) - {pending_user_data.get('department','N/A')}"):
                         approve_col, reject_col = st.columns(2)
-                        if approve_col.button("승인", key=f"admin_approve_user_final_v4_{pending_uid}"):
+                        if approve_col.button("승인", key=f"admin_approve_user_final_v5_{pending_uid}"): # 키 변경
                             USERS[pending_uid]["approved"] = True
                             if save_data_to_blob(USERS, USERS_BLOB_NAME, container_client, "사용자 정보"):
                                 st.success(f"'{pending_uid}' 사용자를 승인하고 Blob에 저장했습니다."); st.rerun()
                             else: st.error("사용자 승인 정보 Blob 저장 실패.")
-                        if reject_col.button("거절", key=f"admin_reject_user_final_v4_{pending_uid}"):
+                        if reject_col.button("거절", key=f"admin_reject_user_final_v5_{pending_uid}"): # 키 변경
                             USERS.pop(pending_uid, None)
                             if save_data_to_blob(USERS, USERS_BLOB_NAME, container_client, "사용자 정보"):
                                 st.info(f"'{pending_uid}' 사용자의 가입 신청을 거절하고 Blob에 저장했습니다."); st.rerun()
@@ -1141,7 +1352,6 @@ if admin_settings_tab:
         st.markdown("---")
 
         st.subheader("📁 파일 업로드 및 학습 (Azure Blob Storage)")
-        # <<< 반복 업로드 방지 로직 적용 >>>
         if 'processed_admin_file_info' not in st.session_state:
             st.session_state.processed_admin_file_info = None
 
@@ -1149,54 +1359,96 @@ if admin_settings_tab:
             print(f"DEBUG admin_file_uploader on_change: Clearing processed_admin_file_info (was: {st.session_state.processed_admin_file_info})")
             st.session_state.processed_admin_file_info = None
 
-        admin_file_uploader_key = "admin_file_uploader_v_final_fix_2" # 키 변경
+        admin_file_uploader_key = "admin_file_uploader_v_final_img_txt" # 키 변경
         admin_uploaded_file = st.file_uploader(
-            "학습할 파일 업로드",
-            type=["pdf","docx","xlsx","xlsm","csv","pptx"],
+            "학습할 파일 업로드 (PDF, DOCX, XLSX, CSV, PPTX, TXT, PNG, JPG, JPEG)",
+            type=["pdf","docx","xlsx","xlsm","csv","pptx", "txt", "png", "jpg", "jpeg"], # 허용 타입 추가
             key=admin_file_uploader_key,
-            on_change=clear_processed_file_info_on_admin_upload_change
+            on_change=clear_processed_file_info_on_admin_upload_change,
+            accept_multiple_files=False # 한 번에 하나의 파일만 처리
         )
 
         if admin_uploaded_file and container_client:
             current_file_info = (admin_uploaded_file.name, admin_uploaded_file.size, admin_uploaded_file.type)
             if st.session_state.processed_admin_file_info != current_file_info:
-                print(f"DEBUG Admin Upload: New or different file detected. File Info: {current_file_info}, Previously Processed Info: {st.session_state.processed_admin_file_info}")
-                with st.spinner(f"'{admin_uploaded_file.name}' 파일 처리 및 학습 중..."):
-                    extracted_content = extract_text_from_file(admin_uploaded_file)
-                    if extracted_content:
-                        content_chunks = chunk_text_into_pieces(extracted_content)
-                        if content_chunks:
-                            original_file_blob_path = save_original_file_to_blob(admin_uploaded_file, container_client)
-                            if original_file_blob_path: st.caption(f"원본 파일이 Blob에 '{original_file_blob_path}'로 저장되었습니다.")
-                            else: st.warning("원본 파일을 Blob에 저장하는 데 실패했습니다.")
+                print(f"DEBUG Admin Upload: New file detected. File Info: {current_file_info}")
+                
+                file_ext_admin = os.path.splitext(admin_uploaded_file.name)[1].lower()
+                is_image_admin_upload = file_ext_admin in [".png", ".jpg", ".jpeg"]
+                content_for_learning = None
+                is_img_desc_for_learning = False
 
-                            if add_document_to_vector_db_and_blob(admin_uploaded_file, extracted_content, content_chunks, container_client):
+                if is_image_admin_upload:
+                    with st.spinner(f"'{admin_uploaded_file.name}' 이미지 처리 및 설명 생성 중..."):
+                        img_bytes_admin = admin_uploaded_file.getvalue()
+                        description_admin = get_image_description(img_bytes_admin, admin_uploaded_file.name, openai_client)
+                    if description_admin:
+                        content_for_learning = description_admin
+                        is_img_desc_for_learning = True
+                        st.info(f"이미지 '{admin_uploaded_file.name}'에 대한 설명이 생성되었습니다 (길이: {len(description_admin)}). 이 설명을 학습합니다.")
+                        st.text_area("생성된 이미지 설명 (학습 대상)", description_admin, height=150, disabled=True)
+                    else:
+                        st.error(f"'{admin_uploaded_file.name}' 이미지 설명을 생성하지 못했습니다. 학습에서 제외됩니다.")
+                else: # 텍스트 기반 파일 (pdf, docx, txt 등)
+                    with st.spinner(f"'{admin_uploaded_file.name}' 파일 내용 추출 중..."):
+                        content_for_learning = extract_text_from_file(admin_uploaded_file)
+                    if content_for_learning:
+                        st.info(f"'{admin_uploaded_file.name}' 파일에서 텍스트를 추출했습니다 (길이: {len(content_for_learning)}).")
+                    else:
+                        st.warning(f"'{admin_uploaded_file.name}' 파일에서 내용을 추출하지 못했거나 비어있습니다. 학습에서 제외됩니다.")
+                
+                if content_for_learning: # 내용이 있거나 (텍스트) 설명이 생성된 경우
+                    with st.spinner(f"'{admin_uploaded_file.name}' 내용 처리 및 학습 진행 중..."):
+                        content_chunks_for_learning = chunk_text_into_pieces(content_for_learning)
+                        if content_chunks_for_learning:
+                            # 원본 파일 저장 (항상)
+                            original_file_blob_path = save_original_file_to_blob(admin_uploaded_file, container_client)
+                            if original_file_blob_path: 
+                                st.caption(f"원본 파일 '{admin_uploaded_file.name}'이 Blob에 '{original_file_blob_path}'로 저장되었습니다.")
+                            else: 
+                                st.warning(f"원본 파일 '{admin_uploaded_file.name}'을 Blob에 저장하는 데 실패했습니다.")
+
+                            # 벡터 DB에 추가 및 메타데이터 저장
+                            if add_document_to_vector_db_and_blob(
+                                admin_uploaded_file, 
+                                content_for_learning, # 원본 텍스트 또는 이미지 설명 전체 (청킹 전)
+                                content_chunks_for_learning, 
+                                container_client, 
+                                is_image_description=is_img_desc_for_learning
+                            ):
                                 st.success(f"'{admin_uploaded_file.name}' 파일 학습 및 Azure Blob Storage에 업데이트 완료!")
-                                st.session_state.processed_admin_file_info = current_file_info
-                                st.rerun()
+                                st.session_state.processed_admin_file_info = current_file_info # 성공 시 정보 기록
+                                # 성공 후 페이지를 새로고침하여 상태를 명확히 하거나, 업로더를 초기화할 수 있음
+                                st.rerun() 
                             else:
                                 st.error(f"'{admin_uploaded_file.name}' 학습 또는 Blob 업데이트 중 오류가 발생했습니다.")
-                                st.session_state.processed_admin_file_info = None
-                        else: st.warning(f"'{admin_uploaded_file.name}' 파일에서 유의미한 청크를 생성하지 못했습니다.")
-                    else: st.warning(f"'{admin_uploaded_file.name}' 파일이 비어있거나 지원하지 않는 내용입니다.")
+                                st.session_state.processed_admin_file_info = None # 실패 시 정보 초기화
+                        else: 
+                            st.warning(f"'{admin_uploaded_file.name}' 파일에서 유의미한 학습 청크를 생성하지 못했습니다.")
+                # (content_for_learning이 없는 경우는 위에서 이미 st.error 또는 st.warning으로 처리됨)
             elif st.session_state.processed_admin_file_info == current_file_info:
-                 st.caption(f"'{admin_uploaded_file.name}' 파일은 이전에 성공적으로 학습되었습니다. 다른 파일을 업로드하거나, 현재 파일을 제거(X 버튼) 후 다시 업로드하여 재학습할 수 있습니다.")
+                 st.caption(f"'{admin_uploaded_file.name}' 파일은 이전에 성공적으로 학습(또는 처리 시도)되었습니다. 다른 파일을 업로드하거나, 현재 파일을 제거(X 버튼) 후 다시 업로드하여 재학습할 수 있습니다.")
         elif admin_uploaded_file and not container_client:
             st.error("Azure Blob 클라이언트가 준비되지 않아 파일을 업로드하고 학습할 수 없습니다.")
         st.markdown("---")
 
         st.subheader("📊 API 사용량 모니터링 (Blob 로그 기반)")
-        # (이전과 동일)
+        # (이전과 동일 - 변경 없음)
         if container_client:
             usage_data_from_blob = load_data_from_blob(USAGE_LOG_BLOB_NAME, container_client, "API 사용량 로그", default_value=[])
             if usage_data_from_blob and isinstance(usage_data_from_blob, list) and len(usage_data_from_blob) > 0 :
                 df_usage_stats=pd.DataFrame(usage_data_from_blob)
+                
+                # 필수 컬럼 존재 확인 및 없으면 0으로 채우기
                 for col in ["total_tokens", "prompt_tokens", "completion_tokens"]:
                      if col not in df_usage_stats.columns:
                          df_usage_stats[col] = 0
+                if "request_type" not in df_usage_stats.columns: # 새로 추가된 컬럼
+                    df_usage_stats["request_type"] = "unknown"
+
 
                 token_cols = ["total_tokens", "prompt_tokens", "completion_tokens"]
-                for col in token_cols:
+                for col in token_cols: # 숫자형으로 변환, 변환 불가 시 0
                     df_usage_stats[col] = pd.to_numeric(df_usage_stats[col], errors='coerce').fillna(0)
 
                 total_tokens_used = df_usage_stats["total_tokens"].sum()
@@ -1205,29 +1457,30 @@ if admin_settings_tab:
 
                 token_cost_per_unit = 0.0
                 try: token_cost_per_unit=float(st.secrets.get("TOKEN_COST","0"))
-                except (ValueError, TypeError): pass
-                st.metric("예상 비용 (USD)", f"${total_tokens_used * token_cost_per_unit:.4f}")
+                except (ValueError, TypeError): pass # 변환 실패 시 0.0 유지
+                st.metric("예상 비용 (USD)", f"${total_tokens_used * token_cost_per_unit:.4f}") # 소수점 4자리까지
 
                 if "timestamp" in df_usage_stats.columns:
-                    try:
+                    try: # timestamp 기준으로 정렬 시도
                          df_usage_stats['timestamp'] = pd.to_datetime(df_usage_stats['timestamp'])
                          st.dataframe(df_usage_stats.sort_values(by="timestamp",ascending=False), use_container_width=True)
-                    except Exception as e:
-                         print(f"Warning: Could not sort usage log by timestamp due to conversion error: {e}")
-                         st.dataframe(df_usage_stats, use_container_width=True)
-                else:
+                    except Exception as e_sort_ts:
+                         print(f"Warning: Could not sort usage log by timestamp due to conversion error: {e_sort_ts}")
+                         st.dataframe(df_usage_stats, use_container_width=True) # 정렬 실패 시 원본 표시
+                else: # timestamp 컬럼이 없을 경우
                     st.dataframe(df_usage_stats, use_container_width=True)
             else: st.info("기록된 API 사용량 데이터가 Blob에 없거나 비어있습니다.")
         else: st.warning("Azure Blob 클라이언트가 준비되지 않아 API 사용량 모니터링을 표시할 수 없습니다.")
         st.markdown("---")
 
         st.subheader("📂 Azure Blob Storage 파일 목록 (최근 100개)")
-        # (이전과 동일)
+        # (이전과 동일 - 변경 없음)
         if container_client:
             try:
                 blob_list_display = []
                 count = 0
-                max_blobs_to_show = 100
+                max_blobs_to_show = 100 # 표시할 최대 Blob 수
+                # last_modified 기준으로 정렬하여 최근 파일부터 가져오기
                 blobs_sorted = sorted(container_client.list_blobs(), key=lambda b: b.last_modified, reverse=True)
 
                 for blob_item in blobs_sorted:
@@ -1239,13 +1492,16 @@ if admin_settings_tab:
                         "수정일": blob_item.last_modified.strftime('%Y-%m-%d %H:%M:%S') if blob_item.last_modified else 'N/A'
                     })
                     count += 1
-
+                
                 if blob_list_display:
                     df_blobs_display = pd.DataFrame(blob_list_display)
                     st.dataframe(df_blobs_display, use_container_width=True)
                 else: st.info("Azure Blob Storage에 파일이 없습니다.")
-            except Exception as e:
-                st.error(f"Azure Blob 파일 목록 조회 중 오류: {e}")
-                print(f"ERROR listing blobs: {e}\n{traceback.format_exc()}")
+            except AzureError as ae_list_blob: # Azure 관련 오류 명시적 처리
+                 st.error(f"Azure Blob 파일 목록 조회 중 Azure 서비스 오류: {ae_list_blob}")
+                 print(f"AZURE ERROR listing blobs: {ae_list_blob}\n{traceback.format_exc()}")
+            except Exception as e_list_blob:
+                st.error(f"Azure Blob 파일 목록 조회 중 알 수 없는 오류: {e_list_blob}")
+                print(f"ERROR listing blobs: {e_list_blob}\n{traceback.format_exc()}")
         else:
             st.warning("Azure Blob 클라이언트가 준비되지 않아 파일 목록을 표시할 수 없습니다.")
