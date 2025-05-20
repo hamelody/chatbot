@@ -8,6 +8,6 @@ openai
 numpy
 azure-storage-blob
 werkzeug
-streamlit-cookies-manager
+streamlit-cookies-manager==0.2.2
 openpyxl
 tiktoken
