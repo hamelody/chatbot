@@ -6,10 +6,9 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# 기본 라이브러리 먼저 임포트
 import os
 import io
-import fitz  # PyMuPDF
+import fitz
 import pandas as pd
 import docx
 from pptx import Presentation
@@ -27,6 +26,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import traceback
 import base64
 import tiktoken
+import re # For comment removal
 
 from streamlit_cookies_manager import EncryptedCookieManager
 print("Imported streamlit_cookies_manager (EncryptedCookieManager only).")
@@ -40,7 +40,6 @@ except Exception as e:
     print(f"ERROR: Failed to load tiktoken encoder: {e}")
     tokenizer = None
 
-# --- 앱 버전 정보 ---
 APP_VERSION = "1.0.4 (Login Page Logo)"
 
 def get_base64_of_bin_file(bin_file_path):
@@ -55,7 +54,6 @@ def get_base64_of_bin_file(bin_file_path):
         print(f"ERROR: Processing logo file '{bin_file_path}': {e}")
         return None
 
-# --- 로고 및 버전 표시를 위한 HTML 생성 함수 ---
 def get_logo_and_version_html(app_version_str):
     logo_html_part = ""
     company_name_default = '<span class="version-text" style="font-weight:bold; font-size: 1.5em;">유앤생명과학</span>'
@@ -76,7 +74,7 @@ def get_logo_and_version_html(app_version_str):
     """
 
 RULES_PATH_REPO = ".streamlit/prompt_rules.txt"
-COMPANY_LOGO_PATH_REPO = "company_logo.png" # 로고 파일 경로
+COMPANY_LOGO_PATH_REPO = "company_logo.png"
 INDEX_BLOB_NAME = "vector_db/vector.index"
 METADATA_BLOB_NAME = "vector_db/metadata.json"
 USERS_BLOB_NAME = "app_data/users.json"
@@ -90,7 +88,6 @@ TARGET_INPUT_TOKENS_FOR_PROMPT = MODEL_MAX_INPUT_TOKENS - MODEL_MAX_OUTPUT_TOKEN
 IMAGE_DESCRIPTION_MAX_TOKENS = 500
 EMBEDDING_BATCH_SIZE = 16
 
-# --- CSS 스타일 ---
 st.markdown("""
 <style>
     /* 기본 CSS 스타일 */
@@ -120,12 +117,12 @@ st.markdown("""
     .main-app-subtitle { font-size: 0.9rem; color: gray; display: block; margin-top: 4px;}
     
     /* 로고 및 버전 */
-    .logo-container { display: flex; align-items: center; } /* 메인 화면 헤더용 */
+    .logo-container { display: flex; align-items: center; }
     .logo-image { margin-right: 10px; }
     .version-text { font-size: 0.9rem; color: gray; }
 
     /* 로그인 화면 전용 제목 스타일 */
-    .login-page-header-container { text-align: center; margin-top: 10px; margin-bottom: 10px;} /* 로고와의 간격 조절 */
+    .login-page-header-container { text-align: center; margin-top: 10px; margin-bottom: 10px;}
     .login-page-main-title { font-size: 1.8rem; font-weight: bold; display: block; color: #333F48; } 
     .login-page-sub-title { font-size: 0.85rem; color: gray; display: block; margin-top: 2px; margin-bottom: 20px;}
     .login-form-title { 
@@ -147,10 +144,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Azure 클라이언트 초기화 ---
 @st.cache_resource
 def get_azure_openai_client_cached():
-    # 함수 내용 생략
     print("Attempting to initialize Azure OpenAI client...")
     try:
         api_version_to_use = st.secrets.get("AZURE_OPENAI_VERSION", "2024-02-15-preview")
@@ -174,7 +169,6 @@ def get_azure_openai_client_cached():
 
 @st.cache_resource
 def get_azure_blob_clients_cached():
-    # 함수 내용 생략
     print("Attempting to initialize Azure Blob Service client...")
     try:
         conn_str = st.secrets["AZURE_BLOB_CONN"]
@@ -209,9 +203,7 @@ if openai_client:
         print(f"ERROR: Loading AZURE_OPENAI_EMBEDDING_DEPLOYMENT secret: {e}")
         openai_client = None
 
-# --- 데이터 로드/저장 유틸리티 함수 (Blob 연동) ---
 def load_data_from_blob(blob_name, _container_client, data_description="data", default_value=None):
-    # 함수 내용 생략
     if not _container_client:
         print(f"ERROR: Blob Container client is None for load_data_from_blob ('{data_description}'). Returning default.")
         return default_value if default_value is not None else {}
@@ -248,7 +240,6 @@ def load_data_from_blob(blob_name, _container_client, data_description="data", d
         return default_value if default_value is not None else {}
 
 def save_data_to_blob(data_to_save, blob_name, _container_client, data_description="data"):
-    # 함수 내용 생략
     if not _container_client:
         st.error(f"Cannot save '{data_description}': Azure Blob client not ready.")
         print(f"ERROR: Blob Container client is None, cannot save '{blob_name}'.")
@@ -276,7 +267,6 @@ def save_data_to_blob(data_to_save, blob_name, _container_client, data_descripti
         return False
 
 def save_binary_data_to_blob(local_file_path, blob_name, _container_client, data_description="binary data"):
-    # 함수 내용 생략
     if not _container_client:
         st.error(f"Cannot save binary '{data_description}': Azure Blob client not ready.")
         print(f"ERROR: Blob Container client is None, cannot save binary '{blob_name}'.")
@@ -356,7 +346,7 @@ if "authenticated" not in st.session_state:
 
     if cookies is not None:
         try:
-            if cookies.ready(): # Try to check readiness
+            if cookies.ready(): 
                 cookie_manager_ready = True
                 print("CookieManager.ready() returned True. Attempting to load cookies for session restore.")
                 auth_cookie_val = cookies.get("authenticated")
@@ -422,17 +412,11 @@ if cookies is not None and not cookie_manager_ready:
         print(f"WARNING: cookies.ready() call just before login UI failed: {e_ready_login_ui}")
 
 if not st.session_state.get("authenticated", False):
-    # --- 로그인 화면 로고 및 버전 표시 ---
-    login_logo_html = get_logo_and_version_html(APP_VERSION)
-    st.markdown(f"""<div style="text-align: center; margin-top: 20px; margin-bottom: 10px;">
-                        <div class="logo-container" style="display: inline-flex; justify-content: center;">
-                           {login_logo_html}
-                        </div>
-                    </div>""", unsafe_allow_html=True)
+    # 로고 및 버전 표시 부분 제거됨
 
-    # --- 로그인 화면 기존 제목 ---
+    # 로그인 화면 기존 제목
     st.markdown("""
-    <div class="login-page-header-container">
+    <div class="login-page-header-container" style="margin-top: 80px;"> 
       <span class="login-page-main-title">유앤생명과학 GMP/SOP 업무 가이드 봇</span>
       <span class="login-page-sub-title">Made by DI.PART</span>
     </div>
@@ -442,7 +426,7 @@ if not st.session_state.get("authenticated", False):
     if cookies is None or not cookie_manager_ready:
         st.warning("쿠키 시스템이 아직 준비되지 않았습니다. 로그인이 유지되지 않을 수 있습니다. 잠시 후 새로고침 해보세요.")
 
-    with st.form("auth_form_final_v5_logo_fix", clear_on_submit=False): # Key updated
+    with st.form("auth_form_final_v5_logo_fix", clear_on_submit=False):
         mode = st.radio("선택", ["로그인", "회원가입"], key="auth_mode_final_v5_logo_fix")
         uid = st.text_input("ID", key="auth_uid_final_v5_logo_fix")
         pwd = st.text_input("비밀번호", type="password", key="auth_pwd_final_v5_logo_fix")
@@ -470,7 +454,7 @@ if not st.session_state.get("authenticated", False):
                         try:
                             if cookies.ready():
                                 cookies["authenticated"] = "true"; cookies["user"] = json.dumps(user_data_login)
-                                cookies["login_time"] = str(time.time()); cookies.save() # Removed key argument
+                                cookies["login_time"] = str(time.time()); cookies.save()
                                 print(f"Cookies saved for user '{uid}'.")
                             else:
                                 st.warning("Cookie system not ready at login. Cannot save login state.")
@@ -499,17 +483,15 @@ if not st.session_state.get("authenticated", False):
 
 current_user_info = st.session_state.get("user", {})
 
-# --- 헤더 (로그인 후 표시) ---
 top_cols_main = st.columns([0.7, 0.3])
 with top_cols_main[0]:
-    # 메인 화면 로고 및 버전 표시 (get_logo_and_version_html 함수 사용)
     main_logo_html = get_logo_and_version_html(APP_VERSION)
     st.markdown(f"""<div class="logo-container">{main_logo_html}</div>""", unsafe_allow_html=True)
 
 
 with top_cols_main[1]:
     st.markdown('<div style="text-align: right;">', unsafe_allow_html=True)
-    if st.button("로그아웃", key="logout_button_final_v5_logo_fix"): # Key updated
+    if st.button("로그아웃", key="logout_button_final_v5_logo_fix"):
         st.session_state["authenticated"] = False
         st.session_state["user"] = {}
         st.session_state["messages"] = []
@@ -520,7 +502,7 @@ with top_cols_main[1]:
                     cookies["authenticated"] = "false"
                     cookies["user"] = ""
                     cookies["login_time"] = ""
-                    cookies.save() # Removed key argument
+                    cookies.save()
                     print("Cookies cleared on logout.")
                 else:
                     print("WARNING: CookieManager not ready during logout. Cannot clear cookies from browser.")
@@ -531,7 +513,6 @@ with top_cols_main[1]:
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 메인 앱 제목 (로그인 후) ---
 st.markdown("""
 <div class="main-app-title-container">
   <span class="main-app-title">유앤생명과학 GMP/SOP 업무 가이드 봇</span>
@@ -540,11 +521,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- 이하 벡터 DB 로드, 규칙 로드, 파일/이미지 처리, 채팅 및 관리자 탭 UI 로직은 이전과 동일하게 유지 ---
-# (생략된 부분은 이전 답변의 전체 코드에서 가져오시면 됩니다)
 @st.cache_resource
 def load_vector_db_from_blob_cached(_container_client):
-    # 함수 내용 생략 - 이전과 동일
     if not _container_client:
         print("ERROR: Blob Container client is None for load_vector_db_from_blob_cached.")
         return faiss.IndexFlatL2(1536), []
@@ -586,7 +564,7 @@ def load_vector_db_from_blob_cached(_container_client):
 
             if idx is not None:
                 metadata_blob_client = _container_client.get_blob_client(METADATA_BLOB_NAME)
-                if metadata_blob_client.exists() and (idx.ntotal > 0 or (index_blob_client.exists() and os.path.exists(local_index_path) and os.path.getsize(local_index_path) > 0) ): # 수정: local_index_path 존재 및 크기 확인
+                if metadata_blob_client.exists() and (idx.ntotal > 0 or (index_blob_client.exists() and os.path.exists(local_index_path) and os.path.getsize(local_index_path) > 0) ):
                     print(f"Downloading '{METADATA_BLOB_NAME}'...")
                     with open(local_metadata_path, "wb") as download_file_meta:
                         download_stream_meta = metadata_blob_client.download_blob(timeout=60)
@@ -630,8 +608,7 @@ else:
 
 @st.cache_data
 def load_prompt_rules_cached():
-    # 함수 내용 생략 - 이전과 동일
-    default_rules = """1.Priority Criteria ... (생략) ..."""
+    default_rules = """1.Priority Criteria ... (생략) ...""" # This Korean text is part of a string literal, not a comment.
     if os.path.exists(RULES_PATH_REPO):
         try:
             with open(RULES_PATH_REPO, "r", encoding="utf-8") as f: rules_content = f.read()
@@ -647,7 +624,6 @@ def load_prompt_rules_cached():
 PROMPT_RULES_CONTENT = load_prompt_rules_cached()
 
 def extract_text_from_file(uploaded_file_obj):
-    # 함수 내용 생략 - 이전과 동일
     ext = os.path.splitext(uploaded_file_obj.name)[1].lower()
     text_content = ""
 
@@ -706,14 +682,68 @@ def extract_text_from_file(uploaded_file_obj):
         return ""
     return text_content.strip()
 
-# ... 이하 다른 함수들 (chunk_text_into_pieces, get_image_description, get_text_embedding, get_batch_embeddings, search_similar_chunks, add_document_to_vector_db_and_blob, save_original_file_to_blob, log_openai_api_usage_to_blob)은 이전과 동일하게 유지 ...
-# ... 채팅 탭 (with chat_interface_tab) 및 관리자 탭 (if admin_settings_tab) 로직도 이전과 동일하게 유지 ...
+def save_original_file_to_blob(uploaded_file_obj, _container_client, base_path="original_files"):
+    if not _container_client or not uploaded_file_obj:
+        print("ERROR: Blob Container client or uploaded file is None for save_original_file_to_blob.")
+        return None
+    try:
+        file_name = uploaded_file_obj.name
+        blob_name = f"{base_path}/{datetime.now().strftime('%Y%m%d%H%M%S')}_{file_name}"
+        
+        blob_client_instance = _container_client.get_blob_client(blob_name)
+        
+        uploaded_file_obj.seek(0)
+        file_bytes = uploaded_file_obj.read()
+        
+        with io.BytesIO(file_bytes) as data_stream:
+            blob_client_instance.upload_blob(data_stream, overwrite=True, timeout=120)
+        
+        print(f"Successfully saved original file '{file_name}' to Blob as '{blob_name}'")
+        return blob_name
+    except AzureError as ae:
+        st.error(f"Azure service error saving original file '{uploaded_file_obj.name}' to Blob: {ae}")
+        print(f"AZURE ERROR saving original file to Blob '{blob_name}': {ae}\n{traceback.format_exc()}")
+        return None
+    except Exception as e:
+        st.error(f"Unknown error saving original file '{uploaded_file_obj.name}' to Blob: {e}")
+        print(f"GENERAL ERROR saving original file to Blob '{blob_name}': {e}\n{traceback.format_exc()}")
+        return None
 
-# (이전 답변의 나머지 코드를 여기에 붙여넣으세요. 
-# get_image_description, get_text_embedding, get_batch_embeddings, search_similar_chunks, 
-# add_document_to_vector_db_and_blob, save_original_file_to_blob, log_openai_api_usage_to_blob,
-# 채팅 탭 (with chat_interface_tab) 및 관리자 탭 (if admin_settings_tab)의 전체 내용)
-# --- 생략된 함수들 정의 (이전 코드에서 복사) ---
+def log_openai_api_usage_to_blob(user_id, model_name, usage_object, _container_client, request_type="general_api_call"):
+    if not _container_client:
+        print(f"ERROR: Blob Container client is None, cannot log API usage to '{USAGE_LOG_BLOB_NAME}'.")
+        return False
+    
+    log_entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "user_id": user_id,
+        "model_name": model_name,
+        "request_type": request_type,
+        "prompt_tokens": getattr(usage_object, 'prompt_tokens', 0),
+        "completion_tokens": getattr(usage_object, 'completion_tokens', 0),
+        "total_tokens": getattr(usage_object, 'total_tokens', 0)
+    }
+    
+    try:
+        current_logs = load_data_from_blob(USAGE_LOG_BLOB_NAME, _container_client, "API usage log", default_value=[])
+        if not isinstance(current_logs, list):
+            print(f"WARNING: API usage log '{USAGE_LOG_BLOB_NAME}' was not a list. Re-initializing as empty list.")
+            current_logs = []
+            
+        current_logs.append(log_entry)
+        
+        if save_data_to_blob(current_logs, USAGE_LOG_BLOB_NAME, _container_client, "API usage log"):
+            print(f"Successfully logged API usage for user '{user_id}' to Blob.")
+            return True
+        else:
+            st.warning(f"Failed to save API usage log to Blob for user '{user_id}'.")
+            print(f"ERROR: Failed to save API usage log to Blob after appending new entry for '{USAGE_LOG_BLOB_NAME}'.")
+            return False
+    except Exception as e:
+        st.error(f"Unknown error while logging API usage to Blob: {e}")
+        print(f"GENERAL ERROR logging API usage to Blob '{USAGE_LOG_BLOB_NAME}': {e}\n{traceback.format_exc()}")
+        return False
+
 def chunk_text_into_pieces(text_to_chunk, chunk_size=500):
     if not text_to_chunk or not text_to_chunk.strip(): return [];
     chunks_list, current_buffer = [], ""
@@ -843,208 +873,213 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, processed_content, tex
         return True
     except Exception as e: st.error(f"Error during document learning or Azure Blob upload: {e}"); print(f"ERROR: Failed to add document or upload to Blob: {e}\n{traceback.format_exc()}"); return False
 
-# --- 채팅 인터페이스 탭 (나머지 로직) ---
-# with chat_interface_tab: ... (이전과 동일) ...
-# --- 관리자 설정 탭 (나머지 로직) ---
-# if admin_settings_tab: ... (이전과 동일) ...
-# (이전 답변에서 제공한 채팅 및 관리자 탭의 나머지 전체 코드를 여기에 붙여넣으세요)
+chat_interface_tab, admin_settings_tab = None, None
+if current_user_info.get("role") == "admin":
+    chat_interface_tab, admin_settings_tab = st.tabs(["💬 챗봇 질문", "⚙️ 관리자 설정"])
+else:
+    chat_interface_tab = st.container() 
 
-with chat_interface_tab:
-    # 함수 내용 생략 - 이전과 동일
-    st.header("업무 질문")
-    st.markdown("💡 예시: SOP 백업 주기, PIC/S Annex 11 차이, (파일 첨부 후) 이 사진 속 상황은 어떤 규정에 해당하나요? 등")
+if chat_interface_tab:
+    with chat_interface_tab:
+        st.header("업무 질문")
+        st.markdown("💡 예시: SOP 백업 주기, PIC/S Annex 11 차이, (파일 첨부 후) 이 사진 속 상황은 어떤 규정에 해당하나요? 등")
 
-    if "messages" not in st.session_state:
-        st.session_state["messages"] = []
+        if "messages" not in st.session_state:
+            st.session_state["messages"] = []
 
-    for msg_item in st.session_state["messages"]:
-        role, content, time_str = msg_item.get("role"), msg_item.get("content", ""), msg_item.get("time", "")
-        align_class = "user-align" if role == "user" else "assistant-align"
-        bubble_class = "user-bubble" if role == "user" else "assistant-bubble"
-        st.markdown(f"""<div class="chat-bubble-container {align_class}"><div class="bubble {bubble_class}">{content}</div><div class="timestamp">{time_str}</div></div>""", unsafe_allow_html=True)
+        for msg_item in st.session_state["messages"]:
+            role, content, time_str = msg_item.get("role"), msg_item.get("content", ""), msg_item.get("time", "")
+            align_class = "user-align" if role == "user" else "assistant-align"
+            bubble_class = "user-bubble" if role == "user" else "assistant-bubble"
+            st.markdown(f"""<div class="chat-bubble-container {align_class}"><div class="bubble {bubble_class}">{content}</div><div class="timestamp">{time_str}</div></div>""", unsafe_allow_html=True)
 
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True) 
-    if st.button("📂 파일 첨부/숨기기", key="toggle_chat_uploader_final_v5_final_fix_btn2"): 
-        st.session_state.show_uploader = not st.session_state.get("show_uploader", False)
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True) 
+        if st.button("📂 파일 첨부/숨기기", key="toggle_chat_uploader_final_v5_final_fix_btn2"): 
+            st.session_state.show_uploader = not st.session_state.get("show_uploader", False)
 
-    chat_file_uploader_key = "chat_file_uploader_final_v5_final_fix_widget2" 
-    uploaded_chat_file_runtime = None 
-    if st.session_state.get("show_uploader", False):
-        uploaded_chat_file_runtime = st.file_uploader("질문과 함께 참고할 파일 첨부 (선택 사항)",
+        chat_file_uploader_key = "chat_file_uploader_final_v5_final_fix_widget2" 
+        uploaded_chat_file_runtime = None 
+        if st.session_state.get("show_uploader", False):
+            uploaded_chat_file_runtime = st.file_uploader("질문과 함께 참고할 파일 첨부 (선택 사항)",
                                      type=["pdf","docx","xlsx","xlsm","csv","pptx", "txt", "png", "jpg", "jpeg"], 
                                      key=chat_file_uploader_key)
-        if uploaded_chat_file_runtime: 
-            st.caption(f"첨부됨: {uploaded_chat_file_runtime.name} ({uploaded_chat_file_runtime.type}, {uploaded_chat_file_runtime.size} bytes)")
-            if uploaded_chat_file_runtime.type.startswith("image/"):
-                st.image(uploaded_chat_file_runtime, width=200)
+            if uploaded_chat_file_runtime: 
+                st.caption(f"첨부됨: {uploaded_chat_file_runtime.name} ({uploaded_chat_file_runtime.type}, {uploaded_chat_file_runtime.size} bytes)")
+                if uploaded_chat_file_runtime.type.startswith("image/"):
+                    st.image(uploaded_chat_file_runtime, width=200)
 
-    with st.form("chat_input_form_final_v5_final_fix2", clear_on_submit=True): 
-        query_input_col, send_button_col = st.columns([4,1])
-        with query_input_col:
-            user_query_input = st.text_input("질문 입력:", placeholder="여기에 질문을 입력하세요...",
+        with st.form("chat_input_form_final_v5_final_fix2", clear_on_submit=True): 
+            query_input_col, send_button_col = st.columns([4,1])
+            with query_input_col:
+                user_query_input = st.text_input("질문 입력:", placeholder="여기에 질문을 입력하세요...",
                                              key="user_query_text_input_final_v5_final_fix2", label_visibility="collapsed") 
-        with send_button_col:
-            send_query_button = st.form_submit_button("전송")
+            with send_button_col:
+                send_query_button = st.form_submit_button("전송")
 
-    if send_query_button and user_query_input.strip():
-        if not openai_client:
-            st.error("OpenAI service not ready. Cannot generate response. Contact admin.")
-        elif not tokenizer: 
-             st.error("Tiktoken library load failed. Cannot generate response.")
-        else:
-            timestamp_now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-            
-            user_message_content = user_query_input
-            if uploaded_chat_file_runtime:
-                user_message_content += f"\n(첨부 파일: {uploaded_chat_file_runtime.name})"
-            st.session_state["messages"].append({"role":"user", "content":user_message_content, "time":timestamp_now_str})
-
-            user_id_for_log = current_user_info.get("name", "anonymous_chat_user_runtime")
-            print(f"User '{user_id_for_log}' submitted query: '{user_query_input[:50]}...' with file: {uploaded_chat_file_runtime.name if uploaded_chat_file_runtime else 'None'}")
-            
-            with st.spinner("답변 생성 중... 잠시만 기다려주세요."):
-                assistant_response_content = "Error generating response. Please try again shortly."
-                try: 
-                    print("Step 1: Preparing context and calculating tokens...")
-                    context_items_for_prompt = []
-                    
-                    text_from_chat_file = None
-                    is_chat_file_image_description = False
-                    chat_file_source_name_for_prompt = None
-
-                    if uploaded_chat_file_runtime:
-                        file_ext_chat = os.path.splitext(uploaded_chat_file_runtime.name)[1].lower()
-                        is_image_chat = file_ext_chat in [".png", ".jpg", ".jpeg"]
-                        
-                        if is_image_chat:
-                            print(f"DEBUG Chat: Processing uploaded image '{uploaded_chat_file_runtime.name}' for description.")
-                            with st.spinner(f"Analyzing attached image '{uploaded_chat_file_runtime.name}'..."):
-                                image_bytes_chat = uploaded_chat_file_runtime.getvalue()
-                                description_chat = get_image_description(image_bytes_chat, uploaded_chat_file_runtime.name, openai_client)
-                            if description_chat:
-                                text_from_chat_file = description_chat
-                                chat_file_source_name_for_prompt = f"User attached image: {uploaded_chat_file_runtime.name}" 
-                                is_chat_file_image_description = True
-                                print(f"DEBUG Chat: Image description generated. Length: {len(description_chat)}")
-                            else:
-                                st.warning(f"Failed to generate description for image '{uploaded_chat_file_runtime.name}'. File excluded from context.")
-                        else: 
-                            print(f"DEBUG Chat: Extracting text from uploaded file '{uploaded_chat_file_runtime.name}'.")
-                            text_from_chat_file = extract_text_from_file(uploaded_chat_file_runtime)
-                            if text_from_chat_file: 
-                                chat_file_source_name_for_prompt = f"User attached file: {uploaded_chat_file_runtime.name}"
-                                print(f"DEBUG Chat: Text extracted. Length: {len(text_from_chat_file)}")
-                            elif text_from_chat_file == "": 
-                                st.info(f"File '{uploaded_chat_file_runtime.name}' is empty or content could not be extracted. Excluded from context.")
-                        
-                        if text_from_chat_file: 
-                            context_items_for_prompt.append({
-                                "source": chat_file_source_name_for_prompt,
-                                "content": text_from_chat_file,
-                                "is_image_description": is_chat_file_image_description 
-                            })
-                    
-                    prompt_structure = f"{PROMPT_RULES_CONTENT}\n\nStrictly adhere to the rules above. The following is document content to help answer the user's question:\n<Document Start>\n{{context}}\n<Document End>"
-                    base_prompt_text = prompt_structure.replace('{context}', '')
-                    try:
-                        base_tokens = len(tokenizer.encode(base_prompt_text))
-                        query_tokens = len(tokenizer.encode(user_query_input))
-                    except Exception as e_tokenize_base:
-                        st.error(f"Error tokenizing base prompt or query: {e_tokenize_base}")
-                        raise 
-                    
-                    max_context_tokens = TARGET_INPUT_TOKENS_FOR_PROMPT - base_tokens - query_tokens
-                    context_string_for_llm = "No reference documents currently available." 
-                    if max_context_tokens <= 0:
-                         st.warning("Input token limit reached by prompt rules and query alone. No additional context can be included.")
-                         context_string_for_llm = "Cannot include context (token limit)."
-                    else:
-                        query_for_db_search = user_query_input
-                        if is_chat_file_image_description and text_from_chat_file: 
-                            query_for_db_search = f"{user_query_input}\n\nImage content: {text_from_chat_file}"
-                        
-                        retrieved_items_from_db = search_similar_chunks(query_for_db_search, k_results=3) 
-                        if retrieved_items_from_db:
-                            context_items_for_prompt.extend(retrieved_items_from_db) 
-                        
-                        if context_items_for_prompt:
-                            seen_contents_for_final_context = set()
-                            formatted_context_chunks = []
-                            for item_idx, item in enumerate(context_items_for_prompt):
-                                if isinstance(item, dict):
-                                    content_value = item.get("content", "")
-                                    source_info = item.get('source', f'Unknown Source {item_idx+1}')
-                                    is_desc_item = item.get("is_image_description", False)
-                                    
-                                    content_strip = content_value.strip()
-                                    if content_strip and content_strip not in seen_contents_for_final_context:
-                                        final_source_display_name = source_info.replace("User attached image: ", "").replace("User attached file: ", "")
-                                        
-                                        if is_desc_item:
-                                            formatted_context_chunks.append(f"[Image Description for: {final_source_display_name}]\n{content_value}")
-                                        else:
-                                            formatted_context_chunks.append(f"[Source: {final_source_display_name}]\n{content_value}")
-                                        seen_contents_for_final_context.add(content_strip)
-                                
-                            if formatted_context_chunks:
-                                full_context_string = "\n\n---\n\n".join(formatted_context_chunks)
-                                try:
-                                    full_context_tokens = tokenizer.encode(full_context_string)
-                                except Exception as e_tokenize_full_ctx:
-                                    st.error(f"Error tokenizing context string: {e_tokenize_full_ctx}")
-                                    raise 
-
-                                if len(full_context_tokens) > max_context_tokens:
-                                    truncated_tokens = full_context_tokens[:max_context_tokens]
-                                    try:
-                                        context_string_for_llm = tokenizer.decode(truncated_tokens)
-                                        if len(full_context_tokens) > len(truncated_tokens) : 
-                                            context_string_for_llm += "\n(...more content, may be truncated.)"
-                                    except Exception as e_decode_truncated:
-                                        st.error(f"Error decoding truncated tokens: {e_decode_truncated}")
-                                        context_string_for_llm = "[Error: Context decode failed]"
-                                else:
-                                    context_string_for_llm = full_context_string
-                    
-                    system_prompt_content = prompt_structure.replace('{context}', context_string_for_llm)
-                    try:
-                        final_system_tokens = len(tokenizer.encode(system_prompt_content))
-                        final_prompt_tokens = final_system_tokens + query_tokens 
-                    except Exception as e_tokenize_final_sys:
-                         st.error(f"Error tokenizing final system prompt: {e_tokenize_final_sys}")
-                         raise
-
-                    if final_prompt_tokens > MODEL_MAX_INPUT_TOKENS:
-                         print(f"CRITICAL WARNING: Final input tokens ({final_prompt_tokens}) exceed model max ({MODEL_MAX_INPUT_TOKENS})!")
-                    
-                    chat_messages_for_api = [{"role":"system", "content": system_prompt_content}, {"role":"user", "content": user_query_input}]
-
-                    print("Step 2: Sending request to Azure OpenAI for chat completion...")
-                    chat_completion_response = openai_client.chat.completions.create(
-                        model=st.secrets["AZURE_OPENAI_DEPLOYMENT"], 
-                        messages=chat_messages_for_api,
-                        max_tokens=MODEL_MAX_OUTPUT_TOKENS, 
-                        temperature=0.1, 
-                        timeout=AZURE_OPENAI_TIMEOUT
-                    )
-                    assistant_response_content = chat_completion_response.choices[0].message.content.strip()
-                    print("Azure OpenAI response received.")
-
-                    if chat_completion_response.usage and container_client:
-                        log_openai_api_usage_to_blob(user_id_for_log, st.secrets["AZURE_OPENAI_DEPLOYMENT"], chat_completion_response.usage, container_client, request_type="chat_completion_with_rag")
+        if send_query_button and user_query_input.strip():
+            if not openai_client:
+                st.error("OpenAI service not ready. Cannot generate response. Contact admin.")
+            elif not tokenizer: 
+                 st.error("Tiktoken library load failed. Cannot generate response.")
+            else:
+                timestamp_now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
                 
-                except Exception as gen_err: 
-                    assistant_response_content = f"Unexpected error during response generation: {gen_err}. Contact admin."
-                    st.error(assistant_response_content)
-                    print(f"UNEXPECTED ERROR during response generation: {gen_err}\n{traceback.format_exc()}")
+                user_message_content = user_query_input
+                if uploaded_chat_file_runtime:
+                    user_message_content += f"\n(첨부 파일: {uploaded_chat_file_runtime.name})"
+                st.session_state["messages"].append({"role":"user", "content":user_message_content, "time":timestamp_now_str})
 
-                st.session_state["messages"].append({"role":"assistant", "content":assistant_response_content, "time":timestamp_now_str})
-                print("Response processing complete.")
-            st.rerun()
+                user_id_for_log = current_user_info.get("name", "anonymous_chat_user_runtime")
+                print(f"User '{user_id_for_log}' submitted query: '{user_query_input[:50]}...' with file: {uploaded_chat_file_runtime.name if uploaded_chat_file_runtime else 'None'}")
+                
+                with st.spinner("답변 생성 중... 잠시만 기다려주세요."):
+                    assistant_response_content = "Error generating response. Please try again shortly."
+                    try: 
+                        print("Step 1: Preparing context and calculating tokens...")
+                        context_items_for_prompt = []
+                        
+                        text_from_chat_file = None
+                        is_chat_file_image_description = False
+                        chat_file_source_name_for_prompt = None
+
+                        if uploaded_chat_file_runtime:
+                            file_ext_chat = os.path.splitext(uploaded_chat_file_runtime.name)[1].lower()
+                            is_image_chat = file_ext_chat in [".png", ".jpg", ".jpeg"]
+                            
+                            if is_image_chat:
+                                print(f"DEBUG Chat: Processing uploaded image '{uploaded_chat_file_runtime.name}' for description.")
+                                with st.spinner(f"Analyzing attached image '{uploaded_chat_file_runtime.name}'..."):
+                                    image_bytes_chat = uploaded_chat_file_runtime.getvalue()
+                                    description_chat = get_image_description(image_bytes_chat, uploaded_chat_file_runtime.name, openai_client)
+                                if description_chat:
+                                    text_from_chat_file = description_chat
+                                    chat_file_source_name_for_prompt = f"User attached image: {uploaded_chat_file_runtime.name}" 
+                                    is_chat_file_image_description = True
+                                    print(f"DEBUG Chat: Image description generated. Length: {len(description_chat)}")
+                                else:
+                                    st.warning(f"Failed to generate description for image '{uploaded_chat_file_runtime.name}'. File excluded from context.")
+                            else: 
+                                print(f"DEBUG Chat: Extracting text from uploaded file '{uploaded_chat_file_runtime.name}'.")
+                                text_from_chat_file = extract_text_from_file(uploaded_chat_file_runtime)
+                                if text_from_chat_file: 
+                                    chat_file_source_name_for_prompt = f"User attached file: {uploaded_chat_file_runtime.name}"
+                                    print(f"DEBUG Chat: Text extracted. Length: {len(text_from_chat_file)}")
+                                elif text_from_chat_file == "": 
+                                    st.info(f"File '{uploaded_chat_file_runtime.name}' is empty or content could not be extracted. Excluded from context.")
+                            
+                            if text_from_chat_file: 
+                                context_items_for_prompt.append({
+                                    "source": chat_file_source_name_for_prompt,
+                                    "content": text_from_chat_file,
+                                    "is_image_description": is_chat_file_image_description 
+                                })
+                        
+                        prompt_structure = f"{PROMPT_RULES_CONTENT}\n\nStrictly adhere to the rules above. The following is document content to help answer the user's question:\n<Document Start>\n{{context}}\n<Document End>"
+                        base_prompt_text = prompt_structure.replace('{context}', '')
+                        try:
+                            base_tokens = len(tokenizer.encode(base_prompt_text))
+                            query_tokens = len(tokenizer.encode(user_query_input))
+                        except Exception as e_tokenize_base:
+                            st.error(f"Error tokenizing base prompt or query: {e_tokenize_base}")
+                            raise 
+                        
+                        max_context_tokens = TARGET_INPUT_TOKENS_FOR_PROMPT - base_tokens - query_tokens
+                        context_string_for_llm = "No reference documents currently available." 
+                        if max_context_tokens <= 0:
+                             st.warning("Input token limit reached by prompt rules and query alone. No additional context can be included.")
+                             context_string_for_llm = "Cannot include context (token limit)."
+                        else:
+                            query_for_db_search = user_query_input
+                            if is_chat_file_image_description and text_from_chat_file: 
+                                query_for_db_search = f"{user_query_input}\n\nImage content: {text_from_chat_file}"
+                            
+                            retrieved_items_from_db = search_similar_chunks(query_for_db_search, k_results=3) 
+                            if retrieved_items_from_db:
+                                context_items_for_prompt.extend(retrieved_items_from_db) 
+                            
+                            if context_items_for_prompt:
+                                seen_contents_for_final_context = set()
+                                formatted_context_chunks = []
+                                for item_idx, item in enumerate(context_items_for_prompt):
+                                    if isinstance(item, dict):
+                                        content_value = item.get("content", "")
+                                        source_info = item.get('source', f'Unknown Source {item_idx+1}')
+                                        is_desc_item = item.get("is_image_description", False)
+                                        
+                                        content_strip = content_value.strip()
+                                        if content_strip and content_strip not in seen_contents_for_final_context:
+                                            final_source_display_name = source_info.replace("User attached image: ", "").replace("User attached file: ", "")
+                                            
+                                            if is_desc_item:
+                                                formatted_context_chunks.append(f"[Image Description for: {final_source_display_name}]\n{content_value}")
+                                            else:
+                                                formatted_context_chunks.append(f"[Source: {final_source_display_name}]\n{content_value}")
+                                            seen_contents_for_final_context.add(content_strip)
+                                
+                                if formatted_context_chunks:
+                                    full_context_string = "\n\n---\n\n".join(formatted_context_chunks)
+                                    try:
+                                        full_context_tokens = tokenizer.encode(full_context_string)
+                                    except Exception as e_tokenize_full_ctx:
+                                        st.error(f"Error tokenizing context string: {e_tokenize_full_ctx}")
+                                        raise 
+
+                                    if len(full_context_tokens) > max_context_tokens:
+                                        truncated_tokens = full_context_tokens[:max_context_tokens]
+                                        try:
+                                            context_string_for_llm = tokenizer.decode(truncated_tokens)
+                                            if len(full_context_tokens) > len(truncated_tokens) : 
+                                                context_string_for_llm += "\n(...more content, may be truncated.)"
+                                        except Exception as e_decode_truncated:
+                                            st.error(f"Error decoding truncated tokens: {e_decode_truncated}")
+                                            context_string_for_llm = "[Error: Context decode failed]"
+                                    else:
+                                        context_string_for_llm = full_context_string
+                        
+                        system_prompt_content = prompt_structure.replace('{context}', context_string_for_llm)
+                        try:
+                            final_system_tokens = len(tokenizer.encode(system_prompt_content))
+                            final_prompt_tokens = final_system_tokens + query_tokens 
+                        except Exception as e_tokenize_final_sys:
+                             st.error(f"Error tokenizing final system prompt: {e_tokenize_final_sys}")
+                             raise
+
+                        if final_prompt_tokens > MODEL_MAX_INPUT_TOKENS:
+                             print(f"CRITICAL WARNING: Final input tokens ({final_prompt_tokens}) exceed model max ({MODEL_MAX_INPUT_TOKENS})!")
+                        
+                        chat_messages_for_api = [{"role":"system", "content": system_prompt_content}, {"role":"user", "content": user_query_input}]
+
+                        print("Step 2: Sending request to Azure OpenAI for chat completion...")
+                        
+                        chat_model_deployment = st.secrets.get("AZURE_OPENAI_DEPLOYMENT")
+                        if not chat_model_deployment:
+                            st.error("Chat model deployment name ('AZURE_OPENAI_DEPLOYMENT') is missing in secrets.")
+                            raise ValueError("Chat model deployment name not configured.")
+                            
+                        chat_completion_response = openai_client.chat.completions.create(
+                            model=chat_model_deployment, 
+                            messages=chat_messages_for_api,
+                            max_tokens=MODEL_MAX_OUTPUT_TOKENS, 
+                            temperature=0.1, 
+                            timeout=AZURE_OPENAI_TIMEOUT
+                        )
+                        assistant_response_content = chat_completion_response.choices[0].message.content.strip()
+                        print("Azure OpenAI response received.")
+
+                        if chat_completion_response.usage and container_client:
+                            log_openai_api_usage_to_blob(user_id_for_log, chat_model_deployment, chat_completion_response.usage, container_client, request_type="chat_completion_with_rag")
+                    
+                    except Exception as gen_err: 
+                        assistant_response_content = f"Unexpected error during response generation: {gen_err}. Contact admin."
+                        st.error(assistant_response_content)
+                        print(f"UNEXPECTED ERROR during response generation: {gen_err}\n{traceback.format_exc()}")
+
+                    st.session_state["messages"].append({"role":"assistant", "content":assistant_response_content, "time":timestamp_now_str})
+                    print("Response processing complete.")
+                st.rerun()
 
 if admin_settings_tab:
     with admin_settings_tab:
-        # 함수 내용 생략 - 이전과 동일
         st.header("⚙️ 관리자 설정")
         st.subheader("👥 가입 승인 대기자")
         if not USERS or not isinstance(USERS, dict):
@@ -1150,7 +1185,6 @@ if admin_settings_tab:
         st.markdown("---")
 
         st.subheader("📊 API 사용량 모니터링 (Blob 로그 기반)")
-        # 함수 내용 생략 - 이전과 동일
         if container_client:
             usage_data_from_blob = load_data_from_blob(USAGE_LOG_BLOB_NAME, container_client, "API usage log", default_value=[])
             if usage_data_from_blob and isinstance(usage_data_from_blob, list) and len(usage_data_from_blob) > 0 :
@@ -1187,7 +1221,6 @@ if admin_settings_tab:
         st.markdown("---")
 
         st.subheader("📂 Azure Blob Storage 파일 목록 (최근 100개)")
-        # 함수 내용 생략 - 이전과 동일
         if container_client:
             try:
                 blob_list_display = []
