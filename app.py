@@ -29,7 +29,7 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-from streamlit_cookies_manager import EncryptedCookieManager
+from streamlit_cookies_manager import EncryptedCookieManager, CookiesNotReady # CookiesNotReady 임포트 추가
 print("Imported streamlit_cookies_manager after set_page_config.")
 
 try:
@@ -61,7 +61,7 @@ UPLOAD_LOG_BLOB_NAME = "app_logs/upload_log.json"
 USAGE_LOG_BLOB_NAME = "app_logs/usage_log.json"
 AZURE_OPENAI_TIMEOUT = 60.0
 MODEL_MAX_INPUT_TOKENS = 128000
-MODEL_MAX_OUTPUT_TOKENS = 16384 # Verify this for gpt-4o-mini, might be smaller (e.g., 4k or 8k)
+MODEL_MAX_OUTPUT_TOKENS = 16384
 BUFFER_TOKENS = 500
 TARGET_INPUT_TOKENS_FOR_PROMPT = MODEL_MAX_INPUT_TOKENS - MODEL_MAX_OUTPUT_TOKENS - BUFFER_TOKENS
 IMAGE_DESCRIPTION_MAX_TOKENS = 500
@@ -69,6 +69,7 @@ EMBEDDING_BATCH_SIZE = 16
 
 st.markdown("""
 <style>
+    /* CSS 내용 생략 - 이전과 동일 */
     .stApp > header ~ div [data-testid="stHorizontalBlock"] > div:nth-child(2) div[data-testid="stButton"] > button {
         background-color: #FFFFFF; color: #333F48; border: 1px solid #BCC0C4;
         border-radius: 8px; padding: 8px 12px; font-weight: 500;
@@ -168,6 +169,7 @@ if openai_client:
         openai_client = None
 
 def load_data_from_blob(blob_name, _container_client, data_description="data", default_value=None):
+    # 함수 내용 생략 - 이전과 동일
     if not _container_client:
         print(f"ERROR: Blob Container client is None for load_data_from_blob ('{data_description}'). Returning default.")
         return default_value if default_value is not None else {}
@@ -205,7 +207,9 @@ def load_data_from_blob(blob_name, _container_client, data_description="data", d
         st.warning(f"Unknown error loading '{data_description}': {e}. Using default.")
         return default_value if default_value is not None else {}
 
+
 def save_data_to_blob(data_to_save, blob_name, _container_client, data_description="data"):
+    # 함수 내용 생략 - 이전과 동일
     if not _container_client:
         st.error(f"Cannot save '{data_description}': Azure Blob client not ready.")
         print(f"ERROR: Blob Container client is None, cannot save '{blob_name}'.")
@@ -236,6 +240,7 @@ def save_data_to_blob(data_to_save, blob_name, _container_client, data_descripti
         return False
 
 def save_binary_data_to_blob(local_file_path, blob_name, _container_client, data_description="binary data"):
+    # 함수 내용 생략 - 이전과 동일
     if not _container_client:
         st.error(f"Cannot save binary '{data_description}': Azure Blob client not ready.")
         print(f"ERROR: Blob Container client is None, cannot save binary '{blob_name}'.")
@@ -260,6 +265,7 @@ def save_binary_data_to_blob(local_file_path, blob_name, _container_client, data
         print(f"GENERAL ERROR saving binary '{data_description}' to Blob '{blob_name}': {e}\n{traceback.format_exc()}")
         return False
 
+
 USERS = {}
 if container_client:
     USERS = load_data_from_blob(USERS_BLOB_NAME, container_client, "user info", default_value={})
@@ -281,34 +287,34 @@ else:
     USERS = {"admin": {"name": "관리자(연결실패)", "department": "시스템", "password_hash": generate_password_hash("fallback"), "approved": True, "role": "admin"}}
 
 cookies = None
-cookie_manager_ready = False
+cookie_manager_ready = False # This flag indicates if cookies object is created AND .ready() was initially successful
 print(f"Attempting to load COOKIE_SECRET from st.secrets: {st.secrets.get('COOKIE_SECRET')}")
 try:
     cookie_secret_key = st.secrets.get("COOKIE_SECRET")
     if not cookie_secret_key:
         st.error("'COOKIE_SECRET' is not set or empty in st.secrets.")
         print("ERROR: COOKIE_SECRET is not set or empty in st.secrets.")
+        # cookies remains None, cookie_manager_ready remains False
     else:
         cookies = EncryptedCookieManager(
-            prefix="gmp_chatbot_auth_v5_3_cookie_fix/", # Incremented prefix
+            prefix="gmp_chatbot_auth_v5_3_cookie_fix/",
             password=cookie_secret_key
         )
         try:
-            # .ready() can itself raise CookiesNotReady if JavaScript side isn't available yet.
-            # We set cookie_manager_ready = True only if .ready() returns True without an exception.
-            if cookies.ready():
+            if cookies.ready(): # Initial attempt to check readiness
                 cookie_manager_ready = True
                 print("CookieManager is ready on initial setup try.")
             else:
                 # cookie_manager_ready remains False
                 print("CookieManager not ready on initial setup try (may resolve on first interaction).")
-        except Exception as e_ready_init: # Catches CookiesNotReady or other errors from .ready()
+        except Exception as e_ready_init: # Catches CookiesNotReady or other errors
             print(f"WARNING: cookies.ready() call during initial setup failed: {e_ready_init}")
             cookie_manager_ready = False
 except Exception as e:
     st.error(f"Unknown error creating cookie manager object: {e}")
     print(f"CRITICAL: CookieManager object creation error: {e}\n{traceback.format_exc()}")
-    cookie_manager_ready = False # Ensure it's false if cookies object itself fails
+    cookies = None # Ensure cookies is None if its creation failed
+    cookie_manager_ready = False
 
 SESSION_TIMEOUT = 1800
 try:
@@ -326,19 +332,17 @@ if "authenticated" not in st.session_state:
     st.session_state["user"] = {}
     st.session_state["messages"] = []
 
-    # --- MODIFIED COOKIE RESTORE LOGIC ---
-    if cookie_manager_ready: # Check the flag set during EncryptedCookieManager instantiation
+    # --- REVISED COOKIE RESTORE LOGIC ---
+    if cookies is not None and cookie_manager_ready: # Check object existence AND our readiness flag
         try:
-            # Before actual cookie operations, double-check .ready()
-            if not cookies.ready(): # This call might still raise CookiesNotReady
-                print("CookieManager reported not ready before attempting to load from browser storage. Skipping cookie load.")
-                st.session_state["authenticated"] = False
-            else:
-                print("CookieManager is ready. Attempting to load cookies from browser storage.")
-                auth_cookie_val = cookies.get("authenticated")
+            # Double-check .ready() before critical operations. This call itself should be safe.
+            if cookies.ready():
+                print("CookieManager is ready. Attempting to load cookies for session restore.")
+                auth_cookie_val = cookies.get("authenticated") # This can raise CookiesNotReady
                 print(f"Cookie 'authenticated' value on session init: {auth_cookie_val}")
+
                 if auth_cookie_val == "true":
-                    login_time_str = cookies.get("login_time", "0")
+                    login_time_str = cookies.get("login_time", "0") # Can raise CookiesNotReady
                     try:
                         login_time = float(login_time_str if login_time_str and login_time_str.replace('.', '', 1).isdigit() else "0")
                     except ValueError:
@@ -346,7 +350,7 @@ if "authenticated" not in st.session_state:
                         login_time = 0.0
 
                     if (time.time() - login_time) < SESSION_TIMEOUT:
-                        user_json_cookie = cookies.get("user", "{}")
+                        user_json_cookie = cookies.get("user", "{}") # Can raise CookiesNotReady
                         try:
                             user_data_from_cookie = json.loads(user_json_cookie if user_json_cookie else "{}")
                             if user_data_from_cookie and isinstance(user_data_from_cookie, dict):
@@ -356,48 +360,53 @@ if "authenticated" not in st.session_state:
                             else:
                                 print("User data in cookie is empty or invalid. Clearing auth state for cookie.")
                                 st.session_state["authenticated"] = False
-                                if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_invalid_user_data_opt_v3")
+                                if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_invalid_user_data_opt_v3_fix")
                         except json.JSONDecodeError:
                             print("ERROR: Failed to decode user JSON from cookie. Clearing auth state for cookie.")
                             st.session_state["authenticated"] = False
-                            if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_json_decode_error_opt_v3")
-                    else:
+                            if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_json_decode_error_opt_v3_fix")
+                    else: # Session timeout
                         print("Session timeout detected from cookie. Clearing auth state for cookie.")
                         st.session_state["authenticated"] = False
                         st.session_state["messages"] = []
-                        if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_session_timeout_opt_v3")
-                else: # auth_cookie_val != "true"
+                        if cookies.ready(): cookies["authenticated"] = "false"; cookies["user"] = ""; cookies["login_time"] = ""; cookies.save(key="cookie_save_on_session_timeout_opt_v3_fix")
+                else: # auth_cookie_val is not "true"
                     print("Authenticated cookie not set to 'true'. Initializing as not authenticated.")
                     st.session_state["authenticated"] = False
-        except Exception as e_cookie_load: # Catches CookiesNotReady from cookies.get or other issues
-            print(f"ERROR during cookie processing (get/save) in session init: {e_cookie_load}\n{traceback.format_exc()}")
+            else: # cookies.ready() returned False on this check
+                print("CookieManager.ready() returned False on second check during session init. Cannot load cookies.")
+                st.session_state["authenticated"] = False
+        except CookiesNotReady: # Catch CookiesNotReady specifically from cookies.get()
+            print("CookiesNotReady exception during cookie operations in session init. Session not restored.")
             st.session_state["authenticated"] = False
-    elif cookies is not None and not cookie_manager_ready:
-        print("CookieManager object exists but not ready (checked by flag), cannot restore session from cookies on this run.")
+        except Exception as e_cookie_load: # Catch other exceptions during cookie loading
+            print(f"General exception during cookie loading in session init: {e_cookie_load}\n{traceback.format_exc()}")
+            st.session_state["authenticated"] = False
+    else: # cookies is None or cookie_manager_ready was False from the start
+        if cookies is None:
+            print("Cookies object is None (initialization failed or secret missing). Cannot restore session.")
+        else: # cookies is not None, but cookie_manager_ready is False
+            print("CookieManager not ready (initial .ready() check failed). Cannot restore session from cookies.")
         st.session_state["authenticated"] = False
-    else: # cookies object is None (e.g., COOKIE_SECRET was missing)
-         print("CookieManager object is None (initialization failed or secret missing), cannot restore session.")
-         st.session_state["authenticated"] = False
-    # --- END OF MODIFIED COOKIE RESTORE LOGIC ---
+    # --- END OF REVISED COOKIE RESTORE LOGIC ---
 
-if "messages" not in st.session_state: # Should have been initialized above, but as a fallback
+if "messages" not in st.session_state:
     st.session_state["messages"] = []
     print("Double check: Initializing messages as it was not in session_state (after auth block).")
 
-
 # This block attempts to make cookie_manager_ready True if it wasn't already,
-# before the login UI is potentially shown.
-if cookies and not cookie_manager_ready:
-    print("Attempting to make CookieManager ready before login UI check...")
+# before the login UI is potentially shown. This is somewhat redundant if the above logic is robust,
+# but kept for an additional chance for the manager to become ready.
+if cookies is not None and not cookie_manager_ready:
+    print("Attempting to make CookieManager ready once more before login UI check...")
     try:
-        if cookies.ready(): # This call might make it ready if conditions are met
+        if cookies.ready():
             cookie_manager_ready = True
-            print("CookieManager became ready just before login UI check (on second attempt).")
+            print("CookieManager became ready just before login UI check (on this second attempt).")
         else:
-            print("CookieManager still not ready just before login UI check (on second attempt).")
-    except Exception as e_ready_login_ui:
+            print("CookieManager still not ready just before login UI check (on this second attempt).")
+    except Exception as e_ready_login_ui: # Catches CookiesNotReady or other errors
         print(f"WARNING: cookies.ready() call just before login UI check failed: {e_ready_login_ui}")
-        # cookie_manager_ready remains False
 
 if not st.session_state.get("authenticated", False):
     st.markdown("""
@@ -407,18 +416,18 @@ if not st.session_state.get("authenticated", False):
     </div>
     """, unsafe_allow_html=True)
     st.markdown('<p class="login-form-title">🔐 로그인 또는 회원가입</p>', unsafe_allow_html=True)
-    
-    if not cookie_manager_ready and st.secrets.get("COOKIE_SECRET"): # Check flag here
-        st.warning("Cookie system initializing or not fully ready. Please refresh or try again shortly. Login persistence might be affected.")
 
-    with st.form("auth_form_final_v5_cookie_fix", clear_on_submit=False):
-        mode = st.radio("선택", ["로그인", "회원가입"], key="auth_mode_final_v5_cookie_fix")
-        uid = st.text_input("ID", key="auth_uid_final_v5_cookie_fix")
-        pwd = st.text_input("비밀번호", type="password", key="auth_pwd_final_v5_cookie_fix")
+    if cookies is None or not cookie_manager_ready: # Check both object and flag
+        st.warning("쿠키 시스템 초기화 중이거나 아직 준비되지 않았습니다. 잠시 후 새로고침하거나 다시 시도해주세요. 로그인이 유지되지 않을 수 있습니다.")
+
+    with st.form("auth_form_final_v5_cookie_fix2", clear_on_submit=False): # Key updated
+        mode = st.radio("선택", ["로그인", "회원가입"], key="auth_mode_final_v5_cookie_fix2")
+        uid = st.text_input("ID", key="auth_uid_final_v5_cookie_fix2")
+        pwd = st.text_input("비밀번호", type="password", key="auth_pwd_final_v5_cookie_fix2")
         name, dept = "", ""
         if mode == "회원가입":
-            name = st.text_input("이름", key="auth_name_final_v5_cookie_fix")
-            dept = st.text_input("부서", key="auth_dept_final_v5_cookie_fix")
+            name = st.text_input("이름", key="auth_name_final_v5_cookie_fix2")
+            dept = st.text_input("부서", key="auth_dept_final_v5_cookie_fix2")
         submit_button = st.form_submit_button("확인")
 
     if submit_button:
@@ -434,24 +443,23 @@ if not st.session_state.get("authenticated", False):
                     st.session_state["user"] = user_data_login
                     st.session_state["messages"] = []
                     print(f"Login successful for user '{uid}'. Chat messages cleared.")
-                    
-                    # Attempt to save cookies, checking readiness again
-                    if cookies: # Check if cookies object exists
+
+                    if cookies is not None:
                         try:
-                            if cookies.ready(): # Explicitly check if ready before saving
+                            if cookies.ready():
                                 cookies["authenticated"] = "true"; cookies["user"] = json.dumps(user_data_login)
-                                cookies["login_time"] = str(time.time()); cookies.save(key="cookie_save_on_login_opt_v3")
+                                cookies["login_time"] = str(time.time()); cookies.save(key="cookie_save_on_login_opt_v3_fix")
                                 print(f"Cookies saved for user '{uid}'.")
                             else:
                                 st.warning("Cookie system not ready at login, cannot save login state to browser.")
                                 print("WARNING: CookieManager not ready during login (after .ready() check), cannot save cookies.")
-                        except Exception as e_cookie_save_login: # Catches CookiesNotReady or other save errors
+                        except Exception as e_cookie_save_login:
                             st.warning(f"Problem saving login cookie: {e_cookie_save_login}")
                             print(f"ERROR: Failed to save login cookies: {e_cookie_save_login}")
                     else:
                         st.warning("Cookie system not initialized, cannot save login state.")
                         print("WARNING: CookieManager object is None during login, cannot save cookies.")
-                        
+
                     st.success(f"{user_data_login.get('name', uid)}님, 환영합니다!"); st.rerun()
                 else: st.error("Incorrect password.")
             elif mode == "회원가입":
@@ -477,38 +485,43 @@ with top_cols_main[0]:
             st.markdown(f"""
             <div class="logo-container">
                 <img src="data:image/png;base64,{logo_b64}" class="logo-image" width="150">
-                <span class="version-text">ver 0.9.9 (Cookie Fix)</span>
+                <span class="version-text">ver 0.9.9 (Cookie Fix Attempt 2)</span>
             </div>""", unsafe_allow_html=True)
         else:
-            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.9 (Cookie Fix)</span></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.9 (Cookie Fix Attempt 2)</span></div>""", unsafe_allow_html=True)
     else:
         print(f"WARNING: Company logo file not found at {COMPANY_LOGO_PATH_REPO}")
-        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.9 (Cookie Fix)</span></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="logo-container"><span class="version-text" style="font-weight:bold;">유앤생명과학</span> <span class="version-text" style="margin-left:10px;">ver 0.9.9 (Cookie Fix Attempt 2)</span></div>""", unsafe_allow_html=True)
 
 
 with top_cols_main[1]:
     st.markdown('<div style="text-align: right;">', unsafe_allow_html=True)
-    if st.button("로그아웃", key="logout_button_final_v5_cookie_fix"):
+    if st.button("로그아웃", key="logout_button_final_v5_cookie_fix2"): # Key updated
         st.session_state["authenticated"] = False
         st.session_state["user"] = {}
         st.session_state["messages"] = []
         print("Logout successful. Chat messages cleared.")
-        if cookies: # Check if cookies object exists
+        if cookies is not None:
             try:
-                if cookies.ready(): # Explicitly check if ready before clearing
-                    cookies["authenticated"] = "false" # Set to false instead of deleting
+                if cookies.ready():
+                    cookies["authenticated"] = "false"
                     cookies["user"] = ""
                     cookies["login_time"] = ""
-                    cookies.save(key="cookie_save_on_logout_opt_v3")
+                    cookies.save(key="cookie_save_on_logout_opt_v3_fix")
                     print("Cookies cleared on logout.")
                 else:
                     print("WARNING: CookieManager not ready during logout, cannot clear cookies from browser storage.")
-            except Exception as e_logout_cookie: # Catches CookiesNotReady or other save errors
+            except Exception as e_logout_cookie:
                  print(f"ERROR: Failed to clear cookies on logout: {e_logout_cookie}")
         else:
             print("WARNING: CookieManager object is None during logout, cannot clear cookies.")
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
+
+# --- 이하 코드는 이전 "Optimized" 버전과 동일하게 유지됩니다. ---
+# (메인 앱 제목, 벡터 DB 로드, 규칙 파일 로드, 텍스트 처리 함수들,
+# 이미지 설명 생성 함수, 임베딩 함수들, 유사도 검색 함수,
+# 문서 추가/저장/로깅 함수들, 메인 UI 구성, 채팅 인터페이스, 관리자 탭 등)
 
 st.markdown("""
 <div class="main-app-title-container">
@@ -560,7 +573,7 @@ def load_vector_db_from_blob_cached(_container_client):
 
             if idx is not None:
                 metadata_blob_client = _container_client.get_blob_client(METADATA_BLOB_NAME)
-                if metadata_blob_client.exists() and (idx.ntotal > 0 or (index_blob_client.exists() and os.path.getsize(local_index_path) > 0) ): # Ensure metadata is loaded if index was present or has items
+                if metadata_blob_client.exists() and (idx.ntotal > 0 or (index_blob_client.exists() and os.path.getsize(local_index_path) > 0) ):
                     print(f"Downloading '{METADATA_BLOB_NAME}'...")
                     with open(local_metadata_path, "wb") as download_file_meta:
                         download_stream_meta = metadata_blob_client.download_blob(timeout=60)
@@ -571,16 +584,16 @@ def load_vector_db_from_blob_cached(_container_client):
                         meta = []
                         print(f"WARNING: '{METADATA_BLOB_NAME}' is empty in Blob.")
                 elif idx.ntotal == 0 and not index_blob_client.exists():
-                     print(f"INFO: Index is new and empty, starting with empty metadata.") # Changed from WARNING to INFO
+                     print(f"INFO: Index is new and empty, starting with empty metadata.")
                      meta = []
                 else:
-                    print(f"INFO: Metadata file '{METADATA_BLOB_NAME}' not found or index is empty. Starting with empty metadata.") # Changed from WARNING to INFO
+                    print(f"INFO: Metadata file '{METADATA_BLOB_NAME}' not found or index is empty. Starting with empty metadata.")
                     meta = []
 
             if idx is not None and idx.ntotal == 0 and len(meta) > 0:
-                print(f"INFO: FAISS index is empty (ntotal=0) but metadata is not. Clearing metadata for consistency.") # Changed from WARNING to INFO
+                print(f"INFO: FAISS index is empty (ntotal=0) but metadata is not. Clearing metadata for consistency.")
                 meta = []
-            elif idx is not None and idx.ntotal > 0 and not meta and index_blob_client.exists() and os.path.getsize(local_index_path) > 0 : # Only warn if index file existed
+            elif idx is not None and idx.ntotal > 0 and not meta and index_blob_client.exists() and os.path.getsize(local_index_path) > 0 :
                 print(f"CRITICAL WARNING: FAISS index has data (ntotal={idx.ntotal}) but metadata is empty. This may lead to errors.")
 
     except AzureError as ae:
@@ -713,42 +726,45 @@ def extract_text_from_file(uploaded_file_obj):
     return text_content.strip()
 
 def chunk_text_into_pieces(text_to_chunk, chunk_size=500):
+    # 함수 내용 생략 - 이전과 동일
     if not text_to_chunk or not text_to_chunk.strip(): return [];
     chunks_list, current_buffer = [], ""
-    for line in text_to_chunk.split("\n"):
+    for line in text_to_chunk.split("\n"): 
         stripped_line = line.strip()
-        if not stripped_line and not current_buffer.strip(): continue
-
-        if len(current_buffer) + len(stripped_line) + 1 < chunk_size:
+        if not stripped_line and not current_buffer.strip(): continue 
+        
+        if len(current_buffer) + len(stripped_line) + 1 < chunk_size: 
             current_buffer += stripped_line + "\n"
-        else:
-            if current_buffer.strip():
+        else: 
+            if current_buffer.strip(): 
                 chunks_list.append(current_buffer.strip())
-            current_buffer = stripped_line + "\n"
-
-    if current_buffer.strip():
+            current_buffer = stripped_line + "\n" 
+            
+    if current_buffer.strip(): 
         chunks_list.append(current_buffer.strip())
-
+        
     return [c for c in chunks_list if c]
 
+
 def get_image_description(image_bytes, image_filename, client_instance):
+    # 함수 내용 생략 - 이전과 동일
     if not client_instance:
         st.error("OpenAI client not ready for image description.")
         print("ERROR get_image_description: OpenAI client not ready.")
         return None
-
+    
     print(f"DEBUG get_image_description: Requesting description for image '{image_filename}'")
     try:
         base64_image = base64.b64encode(image_bytes).decode('utf-8')
-
+        
         image_ext_desc = os.path.splitext(image_filename)[1].lower()
-        mime_type = "image/jpeg"
+        mime_type = "image/jpeg" 
         if image_ext_desc == ".png":
             mime_type = "image/png"
         elif image_ext_desc == ".jpg" or image_ext_desc == ".jpeg":
             mime_type = "image/jpeg"
 
-        vision_model_deployment = st.secrets["AZURE_OPENAI_DEPLOYMENT"]
+        vision_model_deployment = st.secrets["AZURE_OPENAI_DEPLOYMENT"] 
         print(f"DEBUG get_image_description: Using vision model deployment: {vision_model_deployment}")
 
         response = client_instance.chat.completions.create(
@@ -761,15 +777,15 @@ def get_image_description(image_bytes, image_filename, client_instance):
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:{mime_type};base64,{base64_image}"
+                                "url": f"data:{mime_type};base64,{base64_image}" 
                             }
                         }
                     ]
                 }
             ],
-            max_tokens=IMAGE_DESCRIPTION_MAX_TOKENS,
-            temperature=0.2,
-            timeout=AZURE_OPENAI_TIMEOUT
+            max_tokens=IMAGE_DESCRIPTION_MAX_TOKENS, 
+            temperature=0.2, 
+            timeout=AZURE_OPENAI_TIMEOUT 
         )
         description = response.choices[0].message.content.strip()
         print(f"DEBUG get_image_description: Description for '{image_filename}' (len: {len(description)} chars) generated successfully.")
@@ -788,11 +804,11 @@ def get_image_description(image_bytes, image_filename, client_instance):
         st.error(f"Timeout generating description for image '{image_filename}'.")
         print(f"TIMEOUT ERROR during image description for '{image_filename}'.")
         return None
-    except APIConnectionError as ace:
+    except APIConnectionError as ace: # 추가된 예외 처리
         st.error(f"API connection error generating description for image '{image_filename}': {ace}.")
         print(f"API CONNECTION ERROR during image description for '{image_filename}': {ace}")
         return None
-    except RateLimitError as rle:
+    except RateLimitError as rle: # 추가된 예외 처리
         st.error(f"API rate limit reached generating description for image '{image_filename}': {rle}.")
         print(f"RATE LIMIT ERROR during image description for '{image_filename}': {rle}")
         return None
@@ -802,6 +818,7 @@ def get_image_description(image_bytes, image_filename, client_instance):
         return None
 
 def get_text_embedding(text_to_embed, client=openai_client, model=EMBEDDING_MODEL):
+    # 함수 내용 생략 - 이전과 동일
     if not client or not model:
         print("ERROR: OpenAI client or embedding model not ready for get_text_embedding.")
         return None
@@ -815,12 +832,14 @@ def get_text_embedding(text_to_embed, client=openai_client, model=EMBEDDING_MODE
             timeout=AZURE_OPENAI_TIMEOUT / 2
         )
         return response.data[0].embedding
-    except Exception as e:
+    except Exception as e: # 더 구체적인 예외 처리가 이미 이전 버전에 있었음, 필요시 복원
         st.error(f"Unexpected error during text embedding: {e}")
         print(f"UNEXPECTED ERROR during single text embedding: {e}\n{traceback.format_exc()}")
         return None
 
+
 def get_batch_embeddings(texts_to_embed, client=openai_client, model=EMBEDDING_MODEL, batch_size=EMBEDDING_BATCH_SIZE):
+    # 함수 내용 생략 - 이전과 동일
     if not client or not model:
         print("ERROR: OpenAI client or embedding model not ready for get_batch_embeddings.")
         return []
@@ -840,22 +859,25 @@ def get_batch_embeddings(texts_to_embed, client=openai_client, model=EMBEDDING_M
                 model=model,
                 timeout=AZURE_OPENAI_TIMEOUT
             )
-            embeddings_data = sorted(response.data, key=lambda e_item: e_item.index)
+            # API 응답에서 인덱스 순서대로 정렬하여 원래 순서 보장
+            embeddings_data = sorted(response.data, key=lambda e_item: e_item.index) 
             batch_embeddings = [item.embedding for item in embeddings_data]
             all_embeddings.extend(batch_embeddings)
             print(f"DEBUG get_batch_embeddings: Embeddings received for batch {i//batch_size + 1}.")
         except APIStatusError as ase:
             st.error(f"API error during batch text embedding (Status {ase.status_code}): {ase.message}.")
             print(f"API STATUS ERROR during batch embedding (batch starting with: '{batch[0][:30]}...'): {ase.message}")
-            all_embeddings.extend([None] * len(batch))
-        except Exception as e:
+            all_embeddings.extend([None] * len(batch)) # 실패한 배치는 None으로 채움
+        except Exception as e: # 기타 모든 예외
             st.error(f"Unexpected error during batch text embedding: {e}")
             print(f"UNEXPECTED ERROR during batch text embedding (batch starting with: '{batch[0][:30]}...'): {e}\n{traceback.format_exc()}")
             all_embeddings.extend([None] * len(batch))
-
+            
     return all_embeddings
 
+
 def search_similar_chunks(query_text, k_results=3):
+    # 함수 내용 생략 - 이전과 동일
     if index is None or index.ntotal == 0 or not metadata:
         return []
     query_vector = get_text_embedding(query_text)
@@ -884,19 +906,21 @@ def search_similar_chunks(query_text, k_results=3):
         print(f"ERROR: Similarity search failed: {e}\n{traceback.format_exc()}")
         return []
 
+
 def add_document_to_vector_db_and_blob(uploaded_file_obj, processed_content, text_chunks, _container_client, is_image_description=False):
+    # 함수 내용 생략 - 이전과 동일 (get_batch_embeddings 사용)
     global index, metadata
-    if not text_chunks:
+    if not text_chunks: 
         st.warning(f"No content (text or image description) to process for '{uploaded_file_obj.name}'.")
         return False
-    if not _container_client:
+    if not _container_client: 
         st.error("Cannot save learning results: Azure Blob client not ready.")
         return False
 
     file_type_for_log = "image description" if is_image_description else "text"
     print(f"Adding '{file_type_for_log}' from '{uploaded_file_obj.name}' to vector DB.")
 
-    chunk_embeddings = get_batch_embeddings(text_chunks)
+    chunk_embeddings = get_batch_embeddings(text_chunks) 
 
     vectors_to_add = []
     new_metadata_entries_for_current_file = []
@@ -907,8 +931,8 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, processed_content, tex
         if embedding is not None:
             vectors_to_add.append(embedding)
             new_metadata_entries_for_current_file.append({
-                "file_name": uploaded_file_obj.name,
-                "content": chunk,
+                "file_name": uploaded_file_obj.name, 
+                "content": chunk, 
                 "is_image_description": is_image_description,
                 "original_file_extension": os.path.splitext(uploaded_file_obj.name)[1].lower()
             })
@@ -921,13 +945,13 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, processed_content, tex
         return False
     if successful_embeddings_count < len(text_chunks):
          st.warning(f"Some content from '{uploaded_file_obj.name}' ({file_type_for_log}) failed embedding. Only successful parts learned.")
-
+    
     try:
         current_embedding_dimension = np.array(vectors_to_add[0]).shape[0]
         if index is None or index.d != current_embedding_dimension:
             print(f"WARNING: FAISS index dimension mismatch or None. Re-initializing with dimension {current_embedding_dimension}.")
             index = faiss.IndexFlatL2(current_embedding_dimension)
-            metadata = []
+            metadata = [] 
 
         if vectors_to_add: index.add(np.array(vectors_to_add).astype("float32"))
         metadata.extend(new_metadata_entries_for_current_file)
@@ -935,27 +959,27 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, processed_content, tex
 
         with tempfile.TemporaryDirectory() as tmpdir:
             temp_index_path = os.path.join(tmpdir, "temp.index")
-            if index.ntotal > 0 :
+            if index.ntotal > 0 : 
                  faiss.write_index(index, temp_index_path)
                  if not save_binary_data_to_blob(temp_index_path, INDEX_BLOB_NAME, _container_client, "vector index"):
-                    st.error("Failed to save vector index to Blob."); return False
-            else:
+                    st.error("Failed to save vector index to Blob."); return False 
+            else: 
                 print(f"Skipping saving empty index to Blob: {INDEX_BLOB_NAME}")
-
+        
         if not save_data_to_blob(metadata, METADATA_BLOB_NAME, _container_client, "metadata"):
             st.error("Failed to save metadata to Blob."); return False
 
         user_info = st.session_state.get("user", {}); uploader_name = user_info.get("name", "N/A")
-        new_log_entry = {"file": uploaded_file_obj.name,
+        new_log_entry = {"file": uploaded_file_obj.name, 
                          "type": "image" if is_image_description else "text_document",
                          "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                          "chunks_added": len(vectors_to_add), "uploader": uploader_name}
 
         current_upload_logs = load_data_from_blob(UPLOAD_LOG_BLOB_NAME, _container_client, "upload log", default_value=[])
-        if not isinstance(current_upload_logs, list): current_upload_logs = []
+        if not isinstance(current_upload_logs, list): current_upload_logs = [] 
         current_upload_logs.append(new_log_entry)
         if not save_data_to_blob(current_upload_logs, UPLOAD_LOG_BLOB_NAME, _container_client, "upload log"):
-            st.warning("Failed to save upload log to Blob.")
+            st.warning("Failed to save upload log to Blob.") 
         return True
     except Exception as e:
         st.error(f"Error during document learning or Azure Blob upload: {e}")
@@ -963,12 +987,13 @@ def add_document_to_vector_db_and_blob(uploaded_file_obj, processed_content, tex
         return False
 
 def save_original_file_to_blob(uploaded_file_obj, _container_client):
+    # 함수 내용 생략 - 이전과 동일
     if not _container_client: st.error("Cannot save original file: Azure Blob client not ready."); return None
     try:
-        uploaded_file_obj.seek(0)
+        uploaded_file_obj.seek(0) 
         original_blob_name = f"uploaded_originals/{datetime.now().strftime('%Y%m%d%H%M%S')}_{uploaded_file_obj.name}"
         blob_client_for_original = _container_client.get_blob_client(blob=original_blob_name)
-        blob_client_for_original.upload_blob(uploaded_file_obj.getvalue(), overwrite=False, timeout=120)
+        blob_client_for_original.upload_blob(uploaded_file_obj.getvalue(), overwrite=False, timeout=120) 
         print(f"Original file '{uploaded_file_obj.name}' saved to Blob as '{original_blob_name}'.")
         return original_blob_name
     except AzureError as ae:
@@ -981,6 +1006,7 @@ def save_original_file_to_blob(uploaded_file_obj, _container_client):
         return None
 
 def log_openai_api_usage_to_blob(user_id_str, model_name_str, usage_stats_obj, _container_client, request_type="chat_completion"):
+    # 함수 내용 생략 - 이전과 동일
     if not _container_client:
         print("ERROR: Blob Container client is None for API usage log. Skipping log.")
         return
@@ -991,8 +1017,8 @@ def log_openai_api_usage_to_blob(user_id_str, model_name_str, usage_stats_obj, _
 
     new_log_entry = {
         "user_id": user_id_str, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "model_used": model_name_str,
-        "request_type": request_type,
+        "model_used": model_name_str, 
+        "request_type": request_type, 
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens, "total_tokens": total_tokens
     }
@@ -1004,6 +1030,7 @@ def log_openai_api_usage_to_blob(user_id_str, model_name_str, usage_stats_obj, _
     if not save_data_to_blob(current_usage_logs, USAGE_LOG_BLOB_NAME, _container_client, "API usage log"):
         print(f"WARNING: Failed to save API usage log to Blob for user '{user_id_str}'.")
 
+# --- 메인 UI 구성 ---
 tab_labels_list = ["💬 업무 질문"]
 if current_user_info.get("role") == "admin":
     tab_labels_list.append("⚙️ 관리자 설정")
@@ -1012,7 +1039,9 @@ main_tabs_list = st.tabs(tab_labels_list)
 chat_interface_tab = main_tabs_list[0]
 admin_settings_tab = main_tabs_list[1] if len(main_tabs_list) > 1 else None
 
+# --- 채팅 인터페이스 탭 ---
 with chat_interface_tab:
+    # 내용 생략 - 이전과 동일 (단, 파일 업로드/처리 로직은 수정된 함수들 호출)
     st.header("업무 질문")
     st.markdown("💡 예시: SOP 백업 주기, PIC/S Annex 11 차이, (파일 첨부 후) 이 사진 속 상황은 어떤 규정에 해당하나요? 등")
 
@@ -1025,37 +1054,37 @@ with chat_interface_tab:
         bubble_class = "user-bubble" if role == "user" else "assistant-bubble"
         st.markdown(f"""<div class="chat-bubble-container {align_class}"><div class="bubble {bubble_class}">{content}</div><div class="timestamp">{time_str}</div></div>""", unsafe_allow_html=True)
 
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-    if st.button("📂 파일 첨부/숨기기", key="toggle_chat_uploader_final_v5_cookie_fix_btn"):
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True) 
+    if st.button("📂 파일 첨부/숨기기", key="toggle_chat_uploader_final_v5_cookie_fix_btn2"): # 키 변경 주의 
         st.session_state.show_uploader = not st.session_state.get("show_uploader", False)
 
-    chat_file_uploader_key = "chat_file_uploader_final_v5_cookie_fix_widget"
-    uploaded_chat_file_runtime = None
+    chat_file_uploader_key = "chat_file_uploader_final_v5_cookie_fix_widget2" # 키 변경 주의
+    uploaded_chat_file_runtime = None 
     if st.session_state.get("show_uploader", False):
         uploaded_chat_file_runtime = st.file_uploader("질문과 함께 참고할 파일 첨부 (선택 사항)",
-                                     type=["pdf","docx","xlsx","xlsm","csv","pptx", "txt", "png", "jpg", "jpeg"],
+                                     type=["pdf","docx","xlsx","xlsm","csv","pptx", "txt", "png", "jpg", "jpeg"], 
                                      key=chat_file_uploader_key)
-        if uploaded_chat_file_runtime:
+        if uploaded_chat_file_runtime: 
             st.caption(f"첨부됨: {uploaded_chat_file_runtime.name} ({uploaded_chat_file_runtime.type}, {uploaded_chat_file_runtime.size} bytes)")
             if uploaded_chat_file_runtime.type.startswith("image/"):
                 st.image(uploaded_chat_file_runtime, width=200)
 
-    with st.form("chat_input_form_final_v5_cookie_fix", clear_on_submit=True):
+    with st.form("chat_input_form_final_v5_cookie_fix2", clear_on_submit=True): # 키 변경 주의
         query_input_col, send_button_col = st.columns([4,1])
         with query_input_col:
             user_query_input = st.text_input("질문 입력:", placeholder="여기에 질문을 입력하세요...",
-                                             key="user_query_text_input_final_v5_cookie_fix", label_visibility="collapsed")
+                                             key="user_query_text_input_final_v5_cookie_fix2", label_visibility="collapsed") # 키 변경 주의
         with send_button_col:
             send_query_button = st.form_submit_button("전송")
 
     if send_query_button and user_query_input.strip():
         if not openai_client:
             st.error("OpenAI service not ready. Cannot generate response. Contact admin.")
-        elif not tokenizer:
+        elif not tokenizer: 
              st.error("Tiktoken library load failed. Cannot generate response.")
         else:
             timestamp_now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-
+            
             user_message_content = user_query_input
             if uploaded_chat_file_runtime:
                 user_message_content += f"\n(첨부 파일: {uploaded_chat_file_runtime.name})"
@@ -1063,13 +1092,13 @@ with chat_interface_tab:
 
             user_id_for_log = current_user_info.get("name", "anonymous_chat_user_runtime")
             print(f"User '{user_id_for_log}' submitted query: '{user_query_input[:50]}...' with file: {uploaded_chat_file_runtime.name if uploaded_chat_file_runtime else 'None'}")
-
+            
             with st.spinner("답변 생성 중... 잠시만 기다려주세요."):
                 assistant_response_content = "Error generating response. Please try again shortly."
-                try:
+                try: # 전체 답변 생성 로직에 대한 try 블록
                     print("Step 1: Preparing context and calculating tokens...")
                     context_items_for_prompt = []
-
+                    
                     text_from_chat_file = None
                     is_chat_file_image_description = False
                     chat_file_source_name_for_prompt = None
@@ -1077,7 +1106,7 @@ with chat_interface_tab:
                     if uploaded_chat_file_runtime:
                         file_ext_chat = os.path.splitext(uploaded_chat_file_runtime.name)[1].lower()
                         is_image_chat = file_ext_chat in [".png", ".jpg", ".jpeg"]
-
+                        
                         if is_image_chat:
                             print(f"DEBUG Chat: Processing uploaded image '{uploaded_chat_file_runtime.name}' for description.")
                             with st.spinner(f"Analyzing attached image '{uploaded_chat_file_runtime.name}'..."):
@@ -1085,27 +1114,28 @@ with chat_interface_tab:
                                 description_chat = get_image_description(image_bytes_chat, uploaded_chat_file_runtime.name, openai_client)
                             if description_chat:
                                 text_from_chat_file = description_chat
-                                chat_file_source_name_for_prompt = f"User attached image: {uploaded_chat_file_runtime.name}"
+                                chat_file_source_name_for_prompt = f"User attached image: {uploaded_chat_file_runtime.name}" 
                                 is_chat_file_image_description = True
                                 print(f"DEBUG Chat: Image description generated. Length: {len(description_chat)}")
                             else:
                                 st.warning(f"Failed to generate description for image '{uploaded_chat_file_runtime.name}'. File excluded from context.")
-                        else:
+                        else: 
                             print(f"DEBUG Chat: Extracting text from uploaded file '{uploaded_chat_file_runtime.name}'.")
                             text_from_chat_file = extract_text_from_file(uploaded_chat_file_runtime)
-                            if text_from_chat_file:
+                            if text_from_chat_file: # 텍스트 추출 성공 시
                                 chat_file_source_name_for_prompt = f"User attached file: {uploaded_chat_file_runtime.name}"
                                 print(f"DEBUG Chat: Text extracted. Length: {len(text_from_chat_file)}")
-                            else:
-                                st.info(f"File '{uploaded_chat_file_runtime.name}' is empty or unsupported. Excluded from context.")
-
-                        if text_from_chat_file:
+                            elif text_from_chat_file == "": # 텍스트 추출 결과가 빈 문자열일 경우 (예: 빈 txt 파일, 지원하지 않는 텍스트 형식)
+                                st.info(f"File '{uploaded_chat_file_runtime.name}' is empty or content could not be extracted. Excluded from context.")
+                            # text_from_chat_file이 None인 경우는 extract_text_from_file에서 오류 발생 시 반환되도록 되어있지 않음 (빈 문자열 반환)
+                        
+                        if text_from_chat_file: # 내용이 있는 경우 (텍스트 또는 이미지 설명)
                             context_items_for_prompt.append({
                                 "source": chat_file_source_name_for_prompt,
                                 "content": text_from_chat_file,
-                                "is_image_description": is_chat_file_image_description
+                                "is_image_description": is_chat_file_image_description 
                             })
-
+                    
                     prompt_structure = f"{PROMPT_RULES_CONTENT}\n\nStrictly adhere to the rules above. The following is document content to help answer the user's question:\n<Document Start>\n{{context}}\n<Document End>"
                     base_prompt_text = prompt_structure.replace('{context}', '')
                     try:
@@ -1113,22 +1143,22 @@ with chat_interface_tab:
                         query_tokens = len(tokenizer.encode(user_query_input))
                     except Exception as e_tokenize_base:
                         st.error(f"Error tokenizing base prompt or query: {e_tokenize_base}")
-                        raise
-
+                        raise 
+                    
                     max_context_tokens = TARGET_INPUT_TOKENS_FOR_PROMPT - base_tokens - query_tokens
-                    context_string_for_llm = "No reference documents currently available."
+                    context_string_for_llm = "No reference documents currently available." 
                     if max_context_tokens <= 0:
                          st.warning("Input token limit reached by prompt rules and query alone. No additional context can be included.")
                          context_string_for_llm = "Cannot include context (token limit)."
                     else:
                         query_for_db_search = user_query_input
-                        if is_chat_file_image_description and text_from_chat_file:
+                        if is_chat_file_image_description and text_from_chat_file: 
                             query_for_db_search = f"{user_query_input}\n\nImage content: {text_from_chat_file}"
-
-                        retrieved_items_from_db = search_similar_chunks(query_for_db_search, k_results=3)
+                        
+                        retrieved_items_from_db = search_similar_chunks(query_for_db_search, k_results=3) 
                         if retrieved_items_from_db:
-                            context_items_for_prompt.extend(retrieved_items_from_db)
-
+                            context_items_for_prompt.extend(retrieved_items_from_db) 
+                        
                         if context_items_for_prompt:
                             seen_contents_for_final_context = set()
                             formatted_context_chunks = []
@@ -1137,56 +1167,56 @@ with chat_interface_tab:
                                     content_value = item.get("content", "")
                                     source_info = item.get('source', f'Unknown Source {item_idx+1}')
                                     is_desc_item = item.get("is_image_description", False)
-
+                                    
                                     content_strip = content_value.strip()
                                     if content_strip and content_strip not in seen_contents_for_final_context:
                                         final_source_display_name = source_info.replace("User attached image: ", "").replace("User attached file: ", "")
-
+                                        
                                         if is_desc_item:
                                             formatted_context_chunks.append(f"[Image Description for: {final_source_display_name}]\n{content_value}")
                                         else:
                                             formatted_context_chunks.append(f"[Source: {final_source_display_name}]\n{content_value}")
                                         seen_contents_for_final_context.add(content_strip)
-
+                                
                             if formatted_context_chunks:
                                 full_context_string = "\n\n---\n\n".join(formatted_context_chunks)
                                 try:
                                     full_context_tokens = tokenizer.encode(full_context_string)
                                 except Exception as e_tokenize_full_ctx:
                                     st.error(f"Error tokenizing context string: {e_tokenize_full_ctx}")
-                                    raise
+                                    raise 
 
                                 if len(full_context_tokens) > max_context_tokens:
                                     truncated_tokens = full_context_tokens[:max_context_tokens]
                                     try:
                                         context_string_for_llm = tokenizer.decode(truncated_tokens)
-                                        if len(full_context_tokens) > len(truncated_tokens) :
+                                        if len(full_context_tokens) > len(truncated_tokens) : 
                                             context_string_for_llm += "\n(...more content, may be truncated.)"
                                     except Exception as e_decode_truncated:
                                         st.error(f"Error decoding truncated tokens: {e_decode_truncated}")
                                         context_string_for_llm = "[Error: Context decode failed]"
                                 else:
                                     context_string_for_llm = full_context_string
-
+                    
                     system_prompt_content = prompt_structure.replace('{context}', context_string_for_llm)
                     try:
                         final_system_tokens = len(tokenizer.encode(system_prompt_content))
-                        final_prompt_tokens = final_system_tokens + query_tokens
+                        final_prompt_tokens = final_system_tokens + query_tokens 
                     except Exception as e_tokenize_final_sys:
                          st.error(f"Error tokenizing final system prompt: {e_tokenize_final_sys}")
                          raise
 
                     if final_prompt_tokens > MODEL_MAX_INPUT_TOKENS:
                          print(f"CRITICAL WARNING: Final input tokens ({final_prompt_tokens}) exceed model max ({MODEL_MAX_INPUT_TOKENS})!")
-
+                    
                     chat_messages_for_api = [{"role":"system", "content": system_prompt_content}, {"role":"user", "content": user_query_input}]
 
                     print("Step 2: Sending request to Azure OpenAI for chat completion...")
                     chat_completion_response = openai_client.chat.completions.create(
-                        model=st.secrets["AZURE_OPENAI_DEPLOYMENT"],
+                        model=st.secrets["AZURE_OPENAI_DEPLOYMENT"], 
                         messages=chat_messages_for_api,
-                        max_tokens=MODEL_MAX_OUTPUT_TOKENS,
-                        temperature=0.1,
+                        max_tokens=MODEL_MAX_OUTPUT_TOKENS, 
+                        temperature=0.1, 
                         timeout=AZURE_OPENAI_TIMEOUT
                     )
                     assistant_response_content = chat_completion_response.choices[0].message.content.strip()
@@ -1194,8 +1224,8 @@ with chat_interface_tab:
 
                     if chat_completion_response.usage and container_client:
                         log_openai_api_usage_to_blob(user_id_for_log, st.secrets["AZURE_OPENAI_DEPLOYMENT"], chat_completion_response.usage, container_client, request_type="chat_completion_with_rag")
-
-                except Exception as gen_err:
+                
+                except Exception as gen_err: 
                     assistant_response_content = f"Unexpected error during response generation: {gen_err}. Contact admin."
                     st.error(assistant_response_content)
                     print(f"UNEXPECTED ERROR during response generation: {gen_err}\n{traceback.format_exc()}")
@@ -1204,8 +1234,10 @@ with chat_interface_tab:
                 print("Response processing complete.")
             st.rerun()
 
+# --- 관리자 설정 탭 ---
 if admin_settings_tab:
     with admin_settings_tab:
+        # 내용 생략 - 이전과 동일 (단, 파일 업로드/처리 로직은 수정된 함수들 호출)
         st.header("⚙️ 관리자 설정")
         st.subheader("👥 가입 승인 대기자")
         if not USERS or not isinstance(USERS, dict):
@@ -1216,12 +1248,12 @@ if admin_settings_tab:
                 for pending_uid, pending_user_data in pending_approval_users.items():
                     with st.expander(f"{pending_user_data.get('name','N/A')} ({pending_uid}) - {pending_user_data.get('department','N/A')}"):
                         approve_col, reject_col = st.columns(2)
-                        if approve_col.button("승인", key=f"admin_approve_user_final_v5_cookie_fix_{pending_uid}"):
+                        if approve_col.button("승인", key=f"admin_approve_user_final_v5_cookie_fix2_{pending_uid}"): 
                             USERS[pending_uid]["approved"] = True
                             if save_data_to_blob(USERS, USERS_BLOB_NAME, container_client, "user info"):
                                 st.success(f"User '{pending_uid}' approved and saved to Blob."); st.rerun()
                             else: st.error("Failed to save user approval to Blob.")
-                        if reject_col.button("거절", key=f"admin_reject_user_final_v5_cookie_fix_{pending_uid}"):
+                        if reject_col.button("거절", key=f"admin_reject_user_final_v5_cookie_fix2_{pending_uid}"): 
                             USERS.pop(pending_uid, None)
                             if save_data_to_blob(USERS, USERS_BLOB_NAME, container_client, "user info"):
                                 st.info(f"User '{pending_uid}' rejected and saved to Blob."); st.rerun()
@@ -1236,20 +1268,20 @@ if admin_settings_tab:
         def clear_processed_file_info_on_admin_upload_change():
             st.session_state.processed_admin_file_info = None
 
-        admin_file_uploader_key = "admin_file_uploader_v_final_cookie_fix"
+        admin_file_uploader_key = "admin_file_uploader_v_final_cookie_fix2" # 키 변경 주의
         admin_uploaded_file = st.file_uploader(
             "학습할 파일 업로드 (PDF, DOCX, XLSX, CSV, PPTX, TXT, PNG, JPG, JPEG)",
-            type=["pdf","docx","xlsx","xlsm","csv","pptx", "txt", "png", "jpg", "jpeg"],
+            type=["pdf","docx","xlsx","xlsm","csv","pptx", "txt", "png", "jpg", "jpeg"], 
             key=admin_file_uploader_key,
             on_change=clear_processed_file_info_on_admin_upload_change,
-            accept_multiple_files=False
+            accept_multiple_files=False 
         )
 
         if admin_uploaded_file and container_client:
             current_file_info = (admin_uploaded_file.name, admin_uploaded_file.size, admin_uploaded_file.type)
             if st.session_state.processed_admin_file_info != current_file_info:
                 print(f"DEBUG Admin Upload: New file detected. File Info: {current_file_info}")
-                try: # Outer try-except for admin file processing
+                try: 
                     file_ext_admin = os.path.splitext(admin_uploaded_file.name)[1].lower()
                     is_image_admin_upload = file_ext_admin in [".png", ".jpg", ".jpeg"]
                     content_for_learning = None
@@ -1266,38 +1298,38 @@ if admin_settings_tab:
                             st.text_area("Generated Image Description (for learning)", description_admin, height=150, disabled=True)
                         else:
                             st.error(f"Failed to generate description for image '{admin_uploaded_file.name}'. Excluded from learning.")
-                    else:
+                    else: 
                         with st.spinner(f"Extracting text from '{admin_uploaded_file.name}'..."):
                             content_for_learning = extract_text_from_file(admin_uploaded_file)
                         if content_for_learning:
                             st.info(f"Text extracted from '{admin_uploaded_file.name}' (Length: {len(content_for_learning)}).")
-                        else:
+                        else: # content_for_learning is "" or None
                             st.warning(f"Could not extract content from '{admin_uploaded_file.name}' or it is empty. Excluded from learning.")
-
-                    if content_for_learning:
+                    
+                    if content_for_learning: 
                         with st.spinner(f"Processing and learning content from '{admin_uploaded_file.name}'..."):
                             content_chunks_for_learning = chunk_text_into_pieces(content_for_learning)
                             if content_chunks_for_learning:
                                 original_file_blob_path = save_original_file_to_blob(admin_uploaded_file, container_client)
-                                if original_file_blob_path:
+                                if original_file_blob_path: 
                                     st.caption(f"Original file '{admin_uploaded_file.name}' saved to Blob as '{original_file_blob_path}'.")
-                                else:
+                                else: 
                                     st.warning(f"Failed to save original file '{admin_uploaded_file.name}' to Blob.")
 
                                 if add_document_to_vector_db_and_blob(
-                                    admin_uploaded_file,
-                                    content_for_learning,
-                                    content_chunks_for_learning,
-                                    container_client,
+                                    admin_uploaded_file, 
+                                    content_for_learning, 
+                                    content_chunks_for_learning, 
+                                    container_client, 
                                     is_image_description=is_img_desc_for_learning
                                 ):
                                     st.success(f"File '{admin_uploaded_file.name}' learned and updated to Azure Blob Storage successfully!")
-                                    st.session_state.processed_admin_file_info = current_file_info
-                                    st.rerun()
+                                    st.session_state.processed_admin_file_info = current_file_info 
+                                    st.rerun() 
                                 else:
                                     st.error(f"Error during learning or Blob update for '{admin_uploaded_file.name}'.")
-                                    st.session_state.processed_admin_file_info = None
-                            else:
+                                    st.session_state.processed_admin_file_info = None 
+                            else: 
                                 st.warning(f"No meaningful learning chunks generated for '{admin_uploaded_file.name}'.")
                 except Exception as e_admin_file_proc:
                     st.error(f"An unexpected error occurred processing file {admin_uploaded_file.name} in admin upload: {e_admin_file_proc}")
@@ -1311,17 +1343,18 @@ if admin_settings_tab:
         st.markdown("---")
 
         st.subheader("📊 API 사용량 모니터링 (Blob 로그 기반)")
+        # 내용 생략 - 이전과 동일
         if container_client:
             usage_data_from_blob = load_data_from_blob(USAGE_LOG_BLOB_NAME, container_client, "API usage log", default_value=[])
             if usage_data_from_blob and isinstance(usage_data_from_blob, list) and len(usage_data_from_blob) > 0 :
                 df_usage_stats=pd.DataFrame(usage_data_from_blob)
-
+                
                 for col in ["total_tokens", "prompt_tokens", "completion_tokens"]:
                      if col not in df_usage_stats.columns: df_usage_stats[col] = 0
                 if "request_type" not in df_usage_stats.columns: df_usage_stats["request_type"] = "unknown"
 
                 token_cols = ["total_tokens", "prompt_tokens", "completion_tokens"]
-                for col in token_cols:
+                for col in token_cols: 
                     df_usage_stats[col] = pd.to_numeric(df_usage_stats[col], errors='coerce').fillna(0)
 
                 total_tokens_used = df_usage_stats["total_tokens"].sum()
@@ -1330,28 +1363,29 @@ if admin_settings_tab:
 
                 token_cost_per_unit = 0.0
                 try: token_cost_per_unit=float(st.secrets.get("TOKEN_COST","0"))
-                except (ValueError, TypeError): pass
-                st.metric("예상 비용 (USD)", f"${total_tokens_used * token_cost_per_unit:.4f}")
+                except (ValueError, TypeError): pass 
+                st.metric("예상 비용 (USD)", f"${total_tokens_used * token_cost_per_unit:.4f}") 
 
                 if "timestamp" in df_usage_stats.columns:
-                    try:
+                    try: 
                          df_usage_stats['timestamp'] = pd.to_datetime(df_usage_stats['timestamp'])
                          st.dataframe(df_usage_stats.sort_values(by="timestamp",ascending=False), use_container_width=True)
                     except Exception as e_sort_ts:
                          print(f"Warning: Could not sort usage log by timestamp: {e_sort_ts}")
-                         st.dataframe(df_usage_stats, use_container_width=True)
-                else:
+                         st.dataframe(df_usage_stats, use_container_width=True) 
+                else: 
                     st.dataframe(df_usage_stats, use_container_width=True)
             else: st.info("No API usage data recorded in Blob or data is empty.")
         else: st.warning("Cannot display API usage monitoring: Azure Blob client not ready.")
         st.markdown("---")
 
         st.subheader("📂 Azure Blob Storage 파일 목록 (최근 100개)")
+        # 내용 생략 - 이전과 동일
         if container_client:
             try:
                 blob_list_display = []
                 count = 0
-                max_blobs_to_show = 100
+                max_blobs_to_show = 100 
                 blobs_sorted = sorted(container_client.list_blobs(), key=lambda b: b.last_modified, reverse=True)
 
                 for blob_item in blobs_sorted:
@@ -1362,12 +1396,12 @@ if admin_settings_tab:
                         "수정일": blob_item.last_modified.strftime('%Y-%m-%d %H:%M:%S') if blob_item.last_modified else 'N/A'
                     })
                     count += 1
-
+                
                 if blob_list_display:
                     df_blobs_display = pd.DataFrame(blob_list_display)
                     st.dataframe(df_blobs_display, use_container_width=True)
                 else: st.info("No files in Azure Blob Storage.")
-            except AzureError as ae_list_blob:
+            except AzureError as ae_list_blob: 
                  st.error(f"Azure service error listing Blob files: {ae_list_blob}")
                  print(f"AZURE ERROR listing blobs: {ae_list_blob}\n{traceback.format_exc()}")
             except Exception as e_list_blob:
