@@ -372,7 +372,7 @@ if "authenticated" not in st.session_state:
         except Exception as e_cookie_load: # Catches CookiesNotReady from cookies.get or other issues
             print(f"ERROR during cookie processing (get/save) in session init: {e_cookie_load}\n{traceback.format_exc()}")
             st.session_state["authenticated"] = False
-    elif cookies and not cookie_manager_ready:
+    elif cookies is not None and not cookie_manager_ready:
         print("CookieManager object exists but not ready (checked by flag), cannot restore session from cookies on this run.")
         st.session_state["authenticated"] = False
     else: # cookies object is None (e.g., COOKIE_SECRET was missing)
