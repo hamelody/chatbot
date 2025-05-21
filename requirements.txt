@@ -11,3 +11,4 @@ werkzeug
 streamlit-cookies-manager
 openpyxl
 tiktoken
+tornado<=6.4.2
