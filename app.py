@@ -636,42 +636,60 @@ def extract_text_from_file(uploaded_file_obj):
         file_bytes = uploaded_file_obj.read()
 
         if ext == ".pdf":
+            # ... (기존 PDF 처리 로직)
             with fitz.open(stream=file_bytes, filetype="pdf") as doc: text_content = "\n".join(page.get_text() for page in doc)
         elif ext == ".docx":
-            with io.BytesIO(file_bytes) as doc_io: doc = docx.Document(doc_io); text_content = "\n".join(para.text for para in doc.paragraphs)
+            with io.BytesIO(file_bytes) as doc_io:
+                doc = docx.Document(doc_io)
+                full_text = []
+                # 단락에서 텍스트 추출
+                for para in doc.paragraphs:
+                    full_text.append(para.text)
+                
+                # 표에서 텍스트 추출
+                for table in doc.tables:
+                    table_data_text = []
+                    for row in table.rows:
+                        row_cells_text = []
+                        for cell in row.cells:
+                            row_cells_text.append(cell.text.strip())
+                        # 각 셀의 텍스트를 " | " 문자로 구분하여 한 행의 텍스트로 합침
+                        table_data_text.append(" | ".join(row_cells_text))
+                    # 각 행의 텍스트를 줄바꿈 문자로 구분하여 표 전체의 텍스트로 합침
+                    full_text.append("\n".join(table_data_text))
+                # 추출된 모든 텍스트(단락, 표)를 두 번의 줄바꿈으로 구분하여 최종 텍스트로 합침
+                text_content = "\n\n".join(full_text)
         elif ext in (".xlsx", ".xlsm"):
+            # ... (기존 Excel 처리 로직)
             with io.BytesIO(file_bytes) as excel_io: df = pd.read_excel(excel_io, sheet_name=None)
             text_content = ""
             for sheet_name, sheet_df in df.items():
                  text_content += f"--- Sheet: {sheet_name} ---\n{sheet_df.to_string(index=False)}\n\n"
         elif ext == ".csv":
+            # ... (기존 CSV 처리 로직)
             with io.BytesIO(file_bytes) as csv_io:
                 try: df = pd.read_csv(csv_io)
                 except UnicodeDecodeError: df = pd.read_csv(csv_io, encoding='cp949')
                 text_content = df.to_string(index=False)
         elif ext == ".pptx":
+            # ... (기존 PPTX 처리 로직)
             with io.BytesIO(file_bytes) as ppt_io: prs = Presentation(ppt_io); text_content = "\n".join(shape.text for slide in prs.slides for shape in slide.shapes if hasattr(shape, "text"))
         elif ext == ".txt":
+            # ... (기존 TXT 처리 로직)
             try:
                 uploaded_file_obj.seek(0)
                 file_bytes_content = uploaded_file_obj.read()
-                print(f"DEBUG TXT: Original bytes for {uploaded_file_obj.name}: {file_bytes_content!r}")
                 text_content = file_bytes_content.decode('utf-8')
-                print(f"DEBUG TXT: Decoded as UTF-8: {text_content!r}")
             except UnicodeDecodeError:
-                print(f"DEBUG TXT: UTF-8 decode failed for {uploaded_file_obj.name}. Trying CP949.")
                 try:
                     uploaded_file_obj.seek(0)
                     file_bytes_content_for_cp949 = uploaded_file_obj.read()
                     text_content = file_bytes_content_for_cp949.decode('cp949')
-                    print(f"DEBUG TXT: Decoded as CP949: {text_content!r}")
                 except Exception as e_txt_decode_cp949:
                     st.warning(f"TXT file '{uploaded_file_obj.name}' CP949 decode failed: {e_txt_decode_cp949}. Content empty.")
-                    print(f"ERROR TXT: CP949 decode failed for {uploaded_file_obj.name}: {e_txt_decode_cp949}")
                     text_content = ""
             except Exception as e_txt_decode_utf8:
                 st.warning(f"TXT file '{uploaded_file_obj.name}' UTF-8 decode failed with general error: {e_txt_decode_utf8}. Content empty.")
-                print(f"ERROR TXT: UTF-8 decode failed for {uploaded_file_obj.name}: {e_txt_decode_utf8}")
                 text_content = ""
         else:
             st.warning(f"Unsupported text file type: {ext} (File: {uploaded_file_obj.name})")
